@@ -14,6 +14,25 @@ import streamlit as st
 from dotenv import load_dotenv
 from src.utils.github import GitHubApp
 
+import glob
+
+try:
+    from google.cloud import firestore
+    
+    # 1. Look through root project folder for a .json file containing 'resiliocheck-ai'
+    _root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    _sa_files = [f for f in glob.glob(os.path.join(_root_dir, "*.json")) if "resiliocheck-ai" in f.lower()]
+    
+    # 2. Initialize db from the detected file path
+    if _sa_files:
+        db = firestore.Client.from_service_account_json(_sa_files[0])
+    else:
+        db = None
+        print("Firestore initialization error: No service account JSON file found.")
+except Exception as e:
+    db = None
+    print(f"Firestore initialization error: {e}")
+
 load_dotenv()
 GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
 GROQ_MODEL: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
@@ -507,6 +526,19 @@ elif st.session_state.page_mode == "dashboard":
                         st.session_state.pr_url = rd.get("pr_url", "")
                         st.session_state.pr_number = rd.get("pr_number")
                         st.session_state.ai_status = rd.get("ai_status", "BLOCKED")
+                        
+                        if db is not None:
+                            try:
+                                data_payload = {
+                                    "analysis_id": aid,
+                                    "repo_url": st.session_state.last_repo,
+                                    "explanation": st.session_state.ai_explanation,
+                                    "pipeline_gates": st.session_state.pipeline_gates
+                                }
+                                doc_id = st.session_state.last_repo.replace("/", "_")
+                                db.collection("scans").document(doc_id).set(data_payload)
+                            except Exception as e:
+                                st.error(f"Firestore save error: {e}")
                     else:
                         st.session_state.ai_explanation = "Analysis complete. Review gate status panel."
                     st.rerun()
@@ -567,6 +599,22 @@ elif st.session_state.page_mode == "dashboard":
         if st.session_state.ai_error:
             st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
             st.warning(f"**Engine Error:** {st.session_state.ai_error}")
+
+        st.markdown("<div style='height:36px;'></div>", unsafe_allow_html=True)
+        st.markdown("<div class='rc-sec'>📜 Historic Scan Records</div>", unsafe_allow_html=True)
+        if db is not None:
+            try:
+                for scan in db.collection("scans").stream():
+                    s_data = scan.to_dict()
+                    _repo = s_data.get("repo_url", "Unknown")
+                    _gate = s_data.get("pipeline_gates", {}).get("gate", "Unknown")
+                    _aid = s_data.get("analysis_id", "N/A")
+                    st.markdown(f"**{_repo}** — Gate Status: `{_gate}`")
+                    st.caption(f"Analysis ID: `{_aid}`")
+            except Exception as e:
+                st.warning(f"Failed to load history: {e}")
+        else:
+            st.info("Firestore not initialized.")
 
     with rc:
         st.markdown(f'<div style="font-size:0.62rem;font-weight:700;text-transform:uppercase;letter-spacing:1.4px;color:#52525B;margin-bottom:14px;display:flex;align-items:center;gap:6px;">{ic("layers",13,"#EA580C")} Pipeline Gate Status</div>', unsafe_allow_html=True)
