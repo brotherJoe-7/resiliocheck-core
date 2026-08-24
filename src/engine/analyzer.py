@@ -89,6 +89,14 @@ class AnalysisOrchestrator:
         analysis_id = request.analysis_id if request.analysis_id else str(uuid.uuid4())
         logger.info("Analysis started | id=%s | repo=%s", analysis_id, request.repo)
 
+        # ✅ SECURITY: Initialise sandbox_source_code here so it is always defined
+        # even if an exception fires before its assignment inside the try block,
+        # preventing UnboundLocalError from crashing the /analyze endpoint.
+        sandbox_source_code: dict = request.source_code
+        ai_status: str = "BLOCKED"
+        sandbox_status: str = "BLOCKED"
+        findings_summary: str = "Analysis not started."
+
         try:
             if not self.groq_api_key:
                 raise RuntimeError("GROQ_API_KEY is not configured.")
@@ -150,14 +158,16 @@ class AnalysisOrchestrator:
                 }
 
             except Exception as e:
-                print(f"🚨 ENGINE CRASH LOG: {str(e)}")
+                # ✅ SECURITY: Log multi-agent crash cleanly to stdout and structured
+                # logger. sandbox_source_code is already initialised above so the
+                # sandbox step can still run against the original files.
+                print(f"🚨 ENGINE CRASH LOG: {type(e).__name__}: {e}")
                 logger.error("Failed during LangChain Multi-Agent execution: %s", traceback.format_exc())
-                
-                # Fallback logic requested by user
+
                 explanation = "Analysis processing fallback triggered due to multi-agent failure."
                 patched_files = {}
                 findings_summary = "Fallback triggered."
-                
+
                 _results_store[analysis_id] = {
                     "explanation": explanation,
                     "patched_files": patched_files,
@@ -167,7 +177,7 @@ class AnalysisOrchestrator:
                 }
                 ai_status = "BLOCKED"
                 sandbox_status = "BLOCKED"
-                sandbox_source_code = request.source_code
+                # sandbox_source_code retains its safe initialisation from above
 
             # Step 2: Sandbox Validation
             logger.info("Sending patched code to Sandbox for %s", analysis_id)

@@ -101,7 +101,15 @@ class ManualAnalysisRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # State Store
 # ---------------------------------------------------------------------------
-_ENGINE_URL = "http://localhost:8001/analyze"
+
+# ✅ SECURITY: Read engine URL from centralised settings — never hardcode service
+# hostnames that change between local dev and cloud deployments.
+try:
+    from config.settings import get_settings as _get_settings
+    _ENGINE_URL = str(_get_settings().engine_url).rstrip("/") + "/analyze"
+except Exception:
+    _ENGINE_URL = "http://localhost:8001/analyze"
+
 _status_store: Dict[str, Dict] = {}
 
 # Safe writable workspace — avoids Windows temp-dir permission errors.
@@ -142,8 +150,17 @@ def _clone_or_download(clone_url: str, dest: Path) -> bool:
         logger.info("Attempting ZIP download from %s", zip_url)
         resp = requests.get(zip_url, timeout=120, stream=True)
         resp.raise_for_status()
+        # ✅ SECURITY: Sanitise every ZIP member before extraction to prevent
+        # path-traversal (CWE-22). An adversarial repo ZIP could contain entries
+        # like '../../etc/cron.d/evil' that escape the workspace directory.
+        dest_abs = str(dest.resolve())
         with zipfile.ZipFile(BytesIO(resp.content)) as zf:
-            zf.extractall(dest)
+            for member in zf.namelist():
+                member_path = os.path.realpath(os.path.join(dest_abs, member))
+                if not member_path.startswith(dest_abs + os.sep) and member_path != dest_abs:
+                    logger.warning("Skipping dangerous ZIP entry: %s", member)
+                    continue
+                zf.extract(member, dest)
         # GitHub wraps everything in a top-level folder — flatten it one level
         entries = list(dest.iterdir())
         if len(entries) == 1 and entries[0].is_dir():

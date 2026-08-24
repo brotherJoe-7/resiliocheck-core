@@ -129,10 +129,14 @@ class SandboxRunner:
 
             # Write source files, flatten sub-paths to avoid Docker Windows path issues
             for fname, content in request.source_code.items():
-                # Use only the basename to avoid nested path issues on Windows
+                # ✅ SECURITY: Two-stage filename sanitisation.
+                # Stage 1: strip all path components (handles forward- and back-slashes).
                 safe_name = os.path.basename(fname.replace("\\", "/"))
-                if not safe_name:
-                    safe_name = "file_" + str(uuid.uuid4())[:8]
+                # Stage 2: allowlist — only permit printable alphanumerics, dots,
+                # underscores, and hyphens. Rejects null-bytes, control characters,
+                # and traversal remnants that basename() alone doesn't eliminate.
+                if not safe_name or not re.match(r"^[A-Za-z0-9._\-]+$", safe_name):
+                    safe_name = "file_" + str(uuid.uuid4())[:8] + ".txt"
                 filepath = os.path.join(tmpdir.name, safe_name)
                 with open(filepath, "w", encoding="utf-8") as f:
                     f.write(content)
@@ -179,7 +183,9 @@ fi
                 command=["/bin/sh", "/app/run_harness.sh"],
                 volumes={host_path: {"bind": "/app", "mode": "rw"}},
                 detach=True,
-                network_disabled=False,
+                # ✅ SECURITY: Disable all outbound networking so untrusted / LLM-
+                # generated code cannot make SSRF calls or exfiltrate data.
+                network_disabled=True,
                 mem_limit="256m",
             )
 

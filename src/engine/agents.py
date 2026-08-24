@@ -38,8 +38,21 @@ def _call_groq(api_key: str, prompt: str, model: str = _GROQ_MODEL) -> dict:
     }
     resp = requests.post(_GROQ_URL, headers=headers, json=payload, timeout=120)
     resp.raise_for_status()
-    content = resp.json()["choices"][0]["message"]["content"]
-    return json.loads(content)
+
+    # ✅ SECURITY: Defensive .get() chaining prevents KeyError / IndexError on
+    # partial or malformed Groq API responses (e.g., empty choices list, missing
+    # message key). Falls back to empty JSON object string so callers still get
+    # a parseable dict.
+    resp_json = resp.json()
+    choices = resp_json.get("choices") or []
+    first_choice = choices[0] if choices else {}
+    raw_content = (first_choice.get("message") or {}).get("content", "{}")
+
+    try:
+        return json.loads(raw_content)
+    except json.JSONDecodeError:
+        logger.warning("_call_groq: response content was not valid JSON — returning empty dict.")
+        return {}
 
 
 # ---------------------------------------------------------------------------
@@ -138,7 +151,10 @@ class OWASPAgent:
         logger.info("Running OWASP Agent via Groq API (model=%s)...", self.model)
         try:
             data = _call_groq(self.api_key, prompt, self.model)
-            findings_raw = data.get("findings", [])
+            findings_raw = data.get("findings") or []
+            if not isinstance(findings_raw, list):
+                logger.warning("OWASPAgent: 'findings' field is not a list — defaulting to empty.")
+                findings_raw = []
             findings = [
                 SecurityFinding(
                     file_path=f.get("file_path", "unknown"),
@@ -152,8 +168,21 @@ class OWASPAgent:
             is_secure = data.get("is_secure", len(findings) == 0)
             return OWASPReport(is_secure=bool(is_secure), findings=findings)
         except Exception as e:
-            logger.error("OWASPAgent Groq call failed: %s", e)
-            raise
+            # ✅ SECURITY: Isolate Groq failures — log cleanly and return a safe
+            # fallback report so the pipeline gate degrades gracefully instead of
+            # crashing the entire analysis with an unhandled exception.
+            logger.error("OWASPAgent Groq call failed — returning safe fallback: %s", e)
+            return OWASPReport(
+                is_secure=False,
+                findings=[
+                    SecurityFinding(
+                        file_path="unknown",
+                        vulnerability_type="Analysis Unavailable",
+                        description=f"OWASP scan could not complete: {e}",
+                        severity="HIGH",
+                    )
+                ],
+            )
 
 
 # ---------------------------------------------------------------------------

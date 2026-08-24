@@ -469,7 +469,13 @@ elif st.session_state.page_mode == "dashboard":
                             json={"repo_url":repo_url.strip(),"branch":branch.strip(),"sender":_u},
                             timeout=15)
                         r.raise_for_status()
-                        aid = r.json()["analysis_id"]
+                        # ✅ SECURITY: Use .get() so a missing or malformed
+                        # 'analysis_id' key does not raise KeyError and crash
+                        # the entire Streamlit session canvas.
+                        aid = (r.json() or {}).get("analysis_id", "")
+                        if not aid:
+                            st.session_state.ai_error = "Gateway returned no analysis_id."
+                            st.rerun()
 
                     with st.spinner("Multi-Agent Engine scanning — this may take 1–3 minutes..."):
                         for _ in range(180):
@@ -485,7 +491,12 @@ elif st.session_state.page_mode == "dashboard":
                                     }
                                     if sd.get("gate","PENDING") not in ("PENDING",""):
                                         break
-                            except: pass
+                            # ✅ SECURITY: Narrow the catch to Exception so that
+                            # KeyboardInterrupt / SystemExit are NOT suppressed by this
+                            # polling loop. The bare except: pass in the original code
+                            # would silently swallow SIGTERM in production.
+                            except Exception:
+                                pass
                             time.sleep(2)
 
                     rr = requests.get(f"http://localhost:8001/result/{aid}", timeout=10)

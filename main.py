@@ -1,9 +1,11 @@
 import os
+import re
 import shutil
 import zipfile
 import requests
 import json
 import docker
+from pathlib import Path
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -12,7 +14,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 if not GROQ_API_KEY:
     print("❌ ERROR: GROQ_API_KEY is missing from .env")
-    exit(1)
+    raise RuntimeError("GROQ_API_KEY is required. Set it in your .env file and restart.")
 
 def download_and_extract_repo(repo_url, target_dir):
     print(f"📥 Downloading repository from {repo_url}...")
@@ -33,11 +35,19 @@ def download_and_extract_repo(repo_url, target_dir):
     zip_path = os.path.join(target_dir, "repo.zip")
     with open(zip_path, "wb") as f:
         f.write(response.content)
-    
+
     print("📦 Extracting files...")
+    # ✅ SECURITY: Sanitise every ZIP member to prevent path-traversal (CWE-22).
+    # Reject any entry whose resolved path escapes the target directory.
+    target_abs = os.path.realpath(target_dir)
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-        zip_ref.extractall(target_dir)
-        
+        for member in zip_ref.namelist():
+            member_path = os.path.realpath(os.path.join(target_abs, member))
+            if not member_path.startswith(target_abs + os.sep) and member_path != target_abs:
+                print(f"⚠️  Skipping dangerous ZIP entry: {member}")
+                continue
+            zip_ref.extract(member, target_dir)
+
     os.remove(zip_path)
 
 def gather_source_files(workspace_dir):
@@ -93,17 +103,25 @@ def run_ai_analysis(js_files):
         )
         response.raise_for_status()
         result = response.json()
-        
-        # ✅ FIXED: Adjusted choices list parsing structure index sequence 
-        content = result["choices"][0]["message"]["content"]
-        ai_data = json.loads(content)
-        
+
+        # ✅ SECURITY: Use defensive .get() chaining to prevent KeyError / IndexError
+        # if the Groq API returns a partial or unexpected response structure.
+        choices = result.get("choices") or []
+        first_choice = choices[0] if choices else {}
+        raw_content = (first_choice.get("message") or {}).get("content", "{}")
+
+        try:
+            ai_data = json.loads(raw_content)
+        except json.JSONDecodeError:
+            print("⚠️  AI returned non-JSON content — treating as empty result.")
+            ai_data = {}
+
         explanation = ai_data.get("explanation", "Code verification processed.")
         patched_code = ai_data.get("patched_code", "")
-        
+
         print("\n📝 AI Explanation:")
         print(explanation)
-        
+
         return patched_code
         
     except Exception as e:
