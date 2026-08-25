@@ -23,6 +23,10 @@ from google.cloud import firestore
 if "firestore_credentials" in st.secrets:
     try:
         cred_dict = dict(st.secrets["firestore_credentials"])
+        # ✅ FIX: TOML secrets store PEM newlines as literal '\n' two-char sequences.
+        # The cryptography PEM loader requires real newline characters — replace them.
+        if "private_key" in cred_dict:
+            cred_dict["private_key"] = cred_dict["private_key"].replace("\\n", "\n")
         db = firestore.Client.from_service_account_info(cred_dict)
     except Exception as _fse:
         st.error(f"Database Auth Failure: {str(_fse)}")
