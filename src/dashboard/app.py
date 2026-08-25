@@ -21,16 +21,22 @@ import glob
 
 try:
     from google.cloud import firestore
-    
-    # 1. Look through root project folder for a .json file containing 'resiliocheck-ai'
-    _root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    _sa_files = [f for f in glob.glob(os.path.join(_root_dir, "*.json")) if "resiliocheck-ai" in f.lower()]
-    
-    # 2. Initialize db from the detected file path
-    if _sa_files:
-        db = firestore.Client.from_service_account_json(_sa_files[0])
+    from google.oauth2 import service_account
+
+    if "firestore_credentials" in st.secrets:
+        # ✅ PRODUCTION: Read credentials directly from Streamlit Cloud secrets TOML block.
+        # No local file access required — credentials are injected by the hosting environment.
+        cred_dict = dict(st.secrets["firestore_credentials"])
+        _creds = service_account.Credentials.from_service_account_info(cred_dict)
+        db = firestore.Client(project=cred_dict.get("project_id", "resiliocheck-ai"), credentials=_creds)
     else:
-        db = firestore.Client(project="ResilioCheck-AI")
+        # ✅ LOCAL DEV FALLBACK: Scan root project folder for a service account JSON key file.
+        _root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        _sa_files = [f for f in glob.glob(os.path.join(_root_dir, "*.json")) if "resiliocheck-ai" in f.lower()]
+        if _sa_files:
+            db = firestore.Client.from_service_account_json(_sa_files[0])
+        else:
+            db = firestore.Client(project="ResilioCheck-AI")
 except Exception as e:
     db = None
     print(f"Firestore initialization error: {e}")
