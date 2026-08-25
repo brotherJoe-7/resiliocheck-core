@@ -17,29 +17,22 @@ import streamlit as st
 from dotenv import load_dotenv
 from src.utils.github import GitHubApp
 
-import glob
+# Production Cloud Secret Connection Routing Handshake
+from google.cloud import firestore
 
-try:
-    from google.cloud import firestore
-    from google.oauth2 import service_account
-
-    if "firestore_credentials" in st.secrets:
-        # ✅ PRODUCTION: Read credentials directly from Streamlit Cloud secrets TOML block.
-        # No local file access required — credentials are injected by the hosting environment.
+if "firestore_credentials" in st.secrets:
+    try:
         cred_dict = dict(st.secrets["firestore_credentials"])
-        _creds = service_account.Credentials.from_service_account_info(cred_dict)
-        db = firestore.Client(project=cred_dict.get("project_id", "resiliocheck-ai"), credentials=_creds)
-    else:
-        # ✅ LOCAL DEV FALLBACK: Scan root project folder for a service account JSON key file.
-        _root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        _sa_files = [f for f in glob.glob(os.path.join(_root_dir, "*.json")) if "resiliocheck-ai" in f.lower()]
-        if _sa_files:
-            db = firestore.Client.from_service_account_json(_sa_files[0])
-        else:
-            db = firestore.Client(project="ResilioCheck-AI")
-except Exception as e:
-    db = None
-    print(f"Firestore initialization error: {e}")
+        db = firestore.Client.from_service_account_info(cred_dict)
+    except Exception as _fse:
+        st.error(f"Database Auth Failure: {str(_fse)}")
+        db = None
+else:
+    # Local fallback for laptop testing runs
+    try:
+        db = firestore.Client(project="ResilioCheck-AI")
+    except Exception:
+        db = None
 
 load_dotenv()
 GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
