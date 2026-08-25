@@ -19,15 +19,33 @@ from src.utils.github import GitHubApp
 
 # Production Cloud Secret Connection Routing Handshake
 from google.cloud import firestore
+from google.oauth2 import service_account
 
 if "firestore_credentials" in st.secrets:
     try:
         cred_dict = dict(st.secrets["firestore_credentials"])
-        # ✅ FIX: TOML secrets store PEM newlines as literal '\n' two-char sequences.
-        # The cryptography PEM loader requires real newline characters — replace them.
-        if "private_key" in cred_dict:
-            cred_dict["private_key"] = cred_dict["private_key"].replace("\\n", "\n")
-        db = firestore.Client.from_service_account_info(cred_dict)
+
+        # ✅ ROBUST PEM FIX: TOML parsers may store the private key with literal
+        # '\n' two-character escape sequences instead of real newline bytes.
+        # We normalise both cases and strip surrounding whitespace to prevent
+        # MalformedFraming errors in the cryptography PEM loader.
+        _pk = cred_dict.get("private_key", "")
+        _pk = _pk.replace("\\n", "\n").strip()
+        # Ensure header/footer lines are separated by real newlines
+        if "-----BEGIN" in _pk and "\n" not in _pk:
+            _pk = _pk.replace("-----BEGIN PRIVATE KEY-----", "-----BEGIN PRIVATE KEY-----\n") \
+                     .replace("-----END PRIVATE KEY-----", "\n-----END PRIVATE KEY-----")
+        cred_dict["private_key"] = _pk
+
+        _credentials = service_account.Credentials.from_service_account_info(
+            cred_dict,
+            scopes=["https://www.googleapis.com/auth/cloud-platform",
+                    "https://www.googleapis.com/auth/datastore"]
+        )
+        db = firestore.Client(
+            project=cred_dict.get("project_id", "resiliocheck-ai"),
+            credentials=_credentials
+        )
     except Exception as _fse:
         st.error(f"Database Auth Failure: {str(_fse)}")
         db = None
