@@ -264,6 +264,8 @@ _D = {
     "last_repo": "", "ai_explanation": "", "ai_patched_files": {}, "pr_url": "", "pr_number": None, "ai_error": "",
     "pipeline_gates": {"webhook_ingestion":"PENDING","ai_analysis":"PENDING","sandbox_validation":"PENDING","rasp_monitoring":"PENDING"},
     "pipeline_failures": 0,
+    "secret_findings": [],
+    "ai_status": "BLOCKED",
 }
 for k, v in _D.items():
     if k not in st.session_state:
@@ -522,12 +524,17 @@ elif st.session_state.page_mode == "dashboard":
                 try:
                     import uuid
                     import shutil
-                    import sys
-                    from main import download_and_extract_repo, gather_source_files, run_ai_analysis, apply_patch_and_validate
-                    
+                    from main import (
+                        download_and_extract_repo,
+                        gather_source_files,
+                        scan_for_secrets,
+                        run_ai_analysis,
+                        apply_patch_and_validate,
+                    )
+
                     aid = str(uuid.uuid4())
-                    
-                    with st.spinner("Dispatching to Gateway (Local Pipeline)..."):
+
+                    with st.spinner("Fetching repository..."):
                         st.session_state.pipeline_gates["webhook_ingestion"] = "APPROVED"
                         WORKSPACE_DIR = f"./tmp_workspace_{aid[:8]}"
                         if os.path.exists(WORKSPACE_DIR):
@@ -535,19 +542,31 @@ elif st.session_state.page_mode == "dashboard":
                         os.makedirs(WORKSPACE_DIR, exist_ok=True)
                         download_and_extract_repo(repo_url.strip(), WORKSPACE_DIR)
 
-                    with st.spinner("Multi-Agent Engine scanning — this may take 1–3 minutes..."):
-                        js_files = gather_source_files(WORKSPACE_DIR)
-                        if not js_files:
-                            st.session_state.ai_explanation = "No JavaScript (.js) files found in the repository."
+                    with st.spinner("Stage 1 — Regex secret pre-scan across all file types..."):
+                        source_files = gather_source_files(WORKSPACE_DIR)
+                        if not source_files:
+                            st.session_state.ai_explanation = "No scannable source files found in the repository."
                             st.session_state.ai_status = "APPROVED"
                             st.session_state.pipeline_gates["ai_analysis"] = "APPROVED"
                             st.session_state.pipeline_gates["sandbox_validation"] = "APPROVED"
+                            st.session_state.secret_findings = []
                         else:
-                            st.session_state.pipeline_gates["ai_analysis"] = "PENDING"
-                            patched_code = run_ai_analysis(js_files)
-                            
+                            secret_findings = scan_for_secrets(source_files)
+                            st.session_state.secret_findings = secret_findings
+                            if secret_findings:
+                                st.session_state.pipeline_gates["ai_analysis"] = "FAILED"
+                            else:
+                                st.session_state.pipeline_gates["ai_analysis"] = "PENDING"
+
+                    if source_files:
+                        with st.spinner("Stage 2 — AI deep analysis (OWASP Top 10, all languages)..."):
+                            explanation, patched_code = run_ai_analysis(
+                                source_files,
+                                st.session_state.get("secret_findings", [])
+                            )
+                            st.session_state.ai_explanation = explanation or "Analysis complete."
                             st.session_state.pipeline_gates["ai_analysis"] = "APPROVED"
-                            st.session_state.ai_explanation = "Analysis complete. Security issues assessed."
+
                             if patched_code:
                                 st.session_state.ai_patched_files = {"patched_script.js": patched_code}
                                 st.session_state.ai_status = "FAILED"
@@ -589,6 +608,19 @@ elif st.session_state.page_mode == "dashboard":
             else:
                 st.markdown(f'<div class="rc-warn"><b style="display:flex;align-items:center;gap:6px;">{ic("alert",15,"#FB923C")} Vulnerability Detected — Review Required</b><br>{expl}</div>', unsafe_allow_html=True)
 
+        # ── Secret Pre-Scan Findings ───────────────────────────────────────────
+        _sfindings = st.session_state.get("secret_findings", [])
+        if _sfindings:
+            st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
+            st.markdown(f'<div style="font-size:0.62rem;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;color:#EF4444;margin-bottom:10px;display:flex;align-items:center;gap:6px;">{ic("alert",12,"#EF4444")} Pre-Scan: {len(_sfindings)} Hardcoded Secret(s) Detected</div>', unsafe_allow_html=True)
+            for _sf in _sfindings:
+                st.markdown(f"""
+                <div style='background:#1C0A0A;border:1px solid #7F1D1D;border-radius:8px;padding:10px 14px;
+                            margin-bottom:8px;font-size:0.78rem;font-family:monospace;'>
+                    <span style='color:#EF4444;font-weight:700;'>[{_sf["pattern"]}]</span>
+                    <span style='color:#71717A;'> {_sf["file"]} : line {_sf["line"]}</span><br>
+                    <span style='color:#A1A1AA;white-space:pre-wrap;'>{_sf["snippet"]}</span>
+                </div>""", unsafe_allow_html=True)
 
         if st.session_state.ai_patched_files:
             st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
