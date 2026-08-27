@@ -1,4 +1,5 @@
 import os
+import time
 import re
 import shutil
 import zipfile
@@ -11,7 +12,7 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL   = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_MODEL   = os.getenv("GROQ_MODEL", "llama3-8b-8192")
 
 # NOTE: The key is validated lazily inside run_ai_analysis() instead of at
 # import time — the dashboard imports helper functions from this module and a
@@ -153,15 +154,15 @@ def download_and_extract_repo(repo_url, target_dir):
     os.remove(zip_path)
 
 
-def gather_source_files(workspace_dir, max_files=4, max_bytes=15_000):
+def gather_source_files(workspace_dir, max_files=20, max_bytes=20_000):
     """
     Recursively walks workspace_dir and collects source files across all
     meaningful languages and config file types. Returns a dict of
     {filepath: content_string}.
 
     Limits:
-    - max_files  : maximum number of files passed to the AI (default 4)
-    - max_bytes  : maximum individual file size in bytes (default 15 KB)
+    - max_files  : maximum number of files passed to the AI (default 20)
+    - max_bytes  : maximum individual file size in bytes (default 20 KB)
     """
     collected = {}
     print("Scanning repository — collecting source files across all languages...")
@@ -253,54 +254,50 @@ def scan_for_secrets(source_files):
 def run_ai_analysis(source_files, secret_findings=None):
     """
     Sends collected source files to the Groq LLM for deep security analysis.
-    If secret_findings is provided, they are prepended to the prompt so the
-    model can suggest remediation for already-detected issues.
+    Uses llama3-8b-8192 for its high TPM allowance on free tier.
+    Files are ranked by security relevance and packed into one prompt that
+    stays within ~7000 tokens to avoid rate-limit errors.
 
     Returns a tuple: (explanation: str, patched_code: str)
     """
     _require_api_key()
     print("Sending code to Groq AI for security analysis...")
 
-    # Build the prompt — language-agnostic, OWASP Top 10 focused
-    prompt_parts = [
+    # Build compact system preamble
+    preamble = (
         "You are an elite application security engineer. Analyse the following source files "
-        "for ALL OWASP Top 10 vulnerability categories including but not limited to: "
-        "SQL/NoSQL injection, XSS, path traversal, hardcoded secrets and API keys, "
-        "weak or missing authentication, insecure deserialization, broken access control, "
-        "security misconfiguration, use of components with known vulnerabilities, and "
-        "insufficient logging. The files may be in any language (JavaScript, TypeScript, "
-        "Python, PHP, Java, Go, Ruby, shell scripts, config files, etc.).\n"
-    ]
+        "for OWASP Top 10 vulnerabilities: SQL injection, XSS, path traversal, hardcoded secrets, "
+        "weak auth, broken access control, security misconfig, and known vulnerable components.\n"
+    )
 
+    secret_block = ""
     if secret_findings:
-        prompt_parts.append(
-            f"\nPRE-SCAN DETECTED {len(secret_findings)} HARDCODED SECRET(S) — "
-            "include remediation advice for each in your explanation:\n"
-        )
-        for f in secret_findings[:20]:  # cap to avoid blowing token budget
-            prompt_parts.append(
-                f"  - [{f['pattern']}] in {f['file']} line {f['line']}: {f['snippet']}\n"
-            )
+        lines = [f"  - [{f['pattern']}] {f['file']}:{f['line']}: {f['snippet']}" for f in secret_findings[:10]]
+        secret_block = f"\nPRE-SCAN: {len(secret_findings)} hardcoded secret(s) detected — include remediation:\n" + "\n".join(lines) + "\n"
 
-    prompt_parts.append(
-        "\nReturn a JSON object with exactly two keys:\n"
-        "'explanation': a detailed string describing every vulnerability found "
-        "(or confirming the code is clean if none are found). "
-        "For each issue include: severity (Critical/High/Medium/Low), "
-        "affected file and line if known, and a specific fix recommendation.\n"
-        "'patched_code': a single raw string with ALL corrected code patches concatenated "
-        "(empty string if no patches are needed).\n"
-        "Output ONLY the raw JSON object. No markdown, no preamble.\n\n"
+    suffix = (
+        "\nReturn ONLY a raw JSON object with two keys:\n"
+        "'explanation': detailed vulnerability findings with severity and fix recommendations.\n"
+        "'patched_code': corrected code string (empty string if no patches needed).\n"
         "--- SOURCE FILES ---\n"
     )
 
+    # Pack as many files as possible within ~27000 chars (~6750 tokens)
+    MAX_PAYLOAD_CHARS = 27_000
+    file_parts = []
+    total_chars = len(preamble) + len(secret_block) + len(suffix)
     for filepath, content in source_files.items():
         fname = os.path.basename(filepath)
-        # Truncate very large files to stay within token budget (approx 2500 chars / 600 tokens)
-        trimmed = content[:2500] if len(content) > 2500 else content
-        prompt_parts.append(f"\n=== {fname} ===\n{trimmed}\n")
+        # Each file gets at most 1500 chars to share budget fairly
+        trimmed = content[:1500] if len(content) > 1500 else content
+        snippet = f"\n=== {fname} ===\n{trimmed}\n"
+        if total_chars + len(snippet) > MAX_PAYLOAD_CHARS:
+            break
+        file_parts.append(snippet)
+        total_chars += len(snippet)
 
-    prompt = "".join(prompt_parts)
+    prompt = preamble + secret_block + suffix + "".join(file_parts)
+    print(f"Prompt payload: {len(prompt)} chars covering {len(file_parts)} file(s).")
 
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
