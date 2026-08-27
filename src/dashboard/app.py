@@ -3,6 +3,7 @@ ResilioCheck AI — Security Operations Dashboard
 src/dashboard/app.py
 """
 from __future__ import annotations
+import html as _html
 import os, sys, time
 
 if sys.platform == "win32":
@@ -18,10 +19,20 @@ from dotenv import load_dotenv
 from src.utils.github import GitHubApp
 
 # Production Cloud Secret Connection Routing Handshake
-from google.cloud import firestore
-from google.oauth2 import service_account
+# ✅ ROBUSTNESS: optional dependency — the dashboard must still boot when the
+# google-cloud libraries are not installed (local/offline development).
+try:
+    from google.cloud import firestore
+    from google.oauth2 import service_account
+    _FIRESTORE_AVAILABLE = True
+except ImportError:
+    firestore = None          # type: ignore[assignment]
+    service_account = None    # type: ignore[assignment]
+    _FIRESTORE_AVAILABLE = False
 
-if "firestore_credentials" in st.secrets:
+if not _FIRESTORE_AVAILABLE:
+    db = None
+elif "firestore_credentials" in st.secrets:
     try:
         cred_dict = dict(st.secrets["firestore_credentials"])
 
@@ -61,6 +72,17 @@ GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
 GROQ_MODEL: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 GITHUB_TOKEN: str = os.getenv("GITHUB_TOKEN", "")
 github_app = GitHubApp(GITHUB_TOKEN) if GITHUB_TOKEN else None
+
+
+def esc(value) -> str:
+    """
+    ✅ SECURITY: HTML-escape any value before it is interpolated into an
+    `unsafe_allow_html=True` markdown block. User-controlled strings (login
+    name, repo URLs), AI model output, and scanned-repo content (secret
+    snippets, filenames) must NEVER be rendered raw — that is a stored/
+    reflected XSS vector inside the dashboard itself.
+    """
+    return _html.escape(str(value), quote=True)
 
 st.set_page_config(
     page_title="ResilioCheck AI | Enterprise Security",
@@ -105,10 +127,15 @@ st.markdown("""
 html,body,[class*="css"]{font-family:'Inter',system-ui,sans-serif!important;}
 
 /* ── Base ── */
-.stApp{background:#09090B!important;}
+.stApp{
+  background:
+    radial-gradient(ellipse 900px 480px at 50% -80px, rgba(234,88,12,0.09), transparent 60%),
+    radial-gradient(ellipse 700px 420px at 88% 12%, rgba(59,130,246,0.05), transparent 55%),
+    #09090B!important;
+}
 .block-container{padding:0 2.5rem 5rem 2.5rem!important;max-width:1300px!important;}
 #MainMenu,footer,header,[data-testid="stDecoration"]{visibility:hidden;}
-[data-testid="stSidebar"]{background:#09090B!important;border-right:1px solid #18181B!important;}
+[data-testid="stSidebar"]{background:#0C0C0F!important;border-right:1px solid #18181B!important;}
 
 /* ── Scrollbar ── */
 ::-webkit-scrollbar{width:5px;}
@@ -124,12 +151,12 @@ code{color:#FB923C!important;background:#1C1917!important;border-radius:4px!impo
 
 /* ── Primary button ── */
 .stButton>button{
-  background:#EA580C!important;color:#fff!important;border:none!important;border-radius:8px!important;
+  background:linear-gradient(180deg,#F97316,#EA580C)!important;color:#fff!important;border:1px solid rgba(255,255,255,0.08)!important;border-radius:10px!important;
   font-family:'Inter',sans-serif!important;font-weight:600!important;font-size:0.875rem!important;
-  padding:11px 22px!important;transition:background 0.15s,box-shadow 0.15s,transform 0.15s!important;
-  box-shadow:0 1px 3px rgba(0,0,0,0.5)!important;cursor:pointer!important;letter-spacing:-0.1px!important;
+  padding:11px 22px!important;transition:filter 0.15s,box-shadow 0.15s,transform 0.15s!important;
+  box-shadow:0 1px 3px rgba(0,0,0,0.5),0 0 22px rgba(234,88,12,0.18)!important;cursor:pointer!important;letter-spacing:-0.1px!important;
 }
-.stButton>button:hover{background:#C2410C!important;transform:translateY(-1px)!important;box-shadow:0 4px 14px rgba(234,88,12,0.35)!important;}
+.stButton>button:hover{filter:brightness(1.08)!important;transform:translateY(-1px)!important;box-shadow:0 6px 22px rgba(234,88,12,0.42)!important;}
 .stButton>button:active{transform:translateY(0)!important;}
 
 /* Secondary */
@@ -151,8 +178,10 @@ code{color:#FB923C!important;background:#1C1917!important;border-radius:4px!impo
 .stFormSubmitButton>button:hover{background:#C2410C!important;}
 
 /* ── Metrics ── */
-[data-testid="stMetric"]{background:#18181B!important;border:1px solid #27272A!important;border-radius:12px!important;padding:20px 22px!important;transition:border-color 0.15s!important;}
-[data-testid="stMetric"]:hover{border-color:#EA580C!important;}
+[data-testid="stMetric"]{background:linear-gradient(180deg,#1B1B1F,#141417)!important;border:1px solid #27272A!important;border-radius:14px!important;padding:20px 22px!important;transition:border-color 0.15s,transform 0.15s,box-shadow 0.15s!important;position:relative!important;overflow:hidden!important;}
+[data-testid="stMetric"]::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,rgba(234,88,12,0.7),transparent);opacity:0;transition:opacity 0.2s;}
+[data-testid="stMetric"]:hover{border-color:#3F3F46!important;transform:translateY(-2px)!important;box-shadow:0 10px 28px rgba(0,0,0,0.45)!important;}
+[data-testid="stMetric"]:hover::before{opacity:1;}
 [data-testid="stMetricLabel"]{color:#52525B!important;font-size:0.67rem!important;font-weight:700!important;text-transform:uppercase!important;letter-spacing:1.4px!important;}
 [data-testid="stMetricValue"]{color:#FAFAFA!important;font-size:1.85rem!important;font-weight:800!important;}
 
@@ -204,7 +233,7 @@ hr{border-color:#18181B!important;}
 .rc-pill em{color:#EA580C;font-style:normal;}
 
 /* Divider band */
-.rc-band{background:#18181B;border-top:1px solid #27272A;border-bottom:1px solid #27272A;padding:32px 0;display:flex;gap:0;margin:0;}
+.rc-band{background:linear-gradient(180deg,#1B1B1F,#141417);border:1px solid #27272A;border-radius:16px;padding:32px 8px;display:flex;gap:0;margin:0;box-shadow:0 12px 32px rgba(0,0,0,0.35);}
 .rc-band-stat{flex:1;padding:0 36px;border-right:1px solid #27272A;}
 .rc-band-stat:first-child{padding-left:0;}
 .rc-band-stat:last-child{border-right:none;}
@@ -217,15 +246,16 @@ hr{border-color:#18181B!important;}
 .rc-sec::after{content:'';flex:1;height:1px;background:#18181B;}
 
 /* Feature cards */
-.rc-card{background:#18181B;border:1px solid #27272A;border-radius:12px;padding:26px 22px;height:100%;transition:border-color 0.15s,transform 0.15s;}
-.rc-card:hover{border-color:#EA580C;transform:translateY(-2px);}
-.rc-card-icon{width:38px;height:38px;border-radius:9px;background:#27272A;display:flex;align-items:center;justify-content:center;margin-bottom:16px;}
+.rc-card{background:linear-gradient(180deg,#1B1B1F,#141417);border:1px solid #27272A;border-radius:14px;padding:26px 22px;height:100%;transition:border-color 0.2s,transform 0.2s,box-shadow 0.2s;}
+.rc-card:hover{border-color:rgba(234,88,12,0.55);transform:translateY(-3px);box-shadow:0 14px 34px rgba(0,0,0,0.5),0 0 24px rgba(234,88,12,0.08);}
+.rc-card-icon{width:40px;height:40px;border-radius:10px;background:linear-gradient(180deg,rgba(234,88,12,0.16),rgba(234,88,12,0.06));border:1px solid rgba(234,88,12,0.25);display:flex;align-items:center;justify-content:center;margin-bottom:16px;}
 .rc-card-t{font-size:0.93rem;font-weight:700;color:#E4E4E7;margin-bottom:9px;}
 .rc-card-d{font-size:0.78rem;color:#52525B;line-height:1.6;}
 .rc-card-tag{display:inline-block;margin-top:14px;font-size:0.61rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#EA580C;border:1px solid #27272A;border-radius:20px;padding:3px 9px;}
 
 /* Gate status */
-.rc-gate{background:#18181B;border:1px solid #27272A;border-left:3px solid;border-radius:10px;padding:13px 16px;display:flex;align-items:center;gap:14px;margin-bottom:8px;}
+.rc-gate{background:linear-gradient(180deg,#1B1B1F,#141417);border:1px solid #27272A;border-left:3px solid;border-radius:12px;padding:13px 16px;display:flex;align-items:center;gap:14px;margin-bottom:8px;transition:transform 0.15s,box-shadow 0.15s;}
+.rc-gate:hover{transform:translateX(2px);box-shadow:0 6px 18px rgba(0,0,0,0.35);}
 .rc-gate-ok{border-left-color:#22C55E;}
 .rc-gate-fail{border-left-color:#EF4444;}
 .rc-gate-pend{border-left-color:#EA580C;}
@@ -236,7 +266,7 @@ hr{border-color:#18181B!important;}
 .rc-gate-pend .rc-gate-val{color:#FB923C;}
 
 /* Input panel */
-.rc-panel{background:#18181B;border:1px solid #27272A;border-radius:12px;padding:24px 22px 22px;}
+.rc-panel{background:linear-gradient(180deg,#1B1B1F,#141417);border:1px solid #27272A;border-radius:14px;padding:24px 22px 22px;box-shadow:0 10px 28px rgba(0,0,0,0.3);}
 .rc-panel-hdr{font-size:0.62rem;font-weight:700;text-transform:uppercase;letter-spacing:1.4px;color:#52525B;display:flex;align-items:center;gap:7px;padding-bottom:14px;border-bottom:1px solid #18181B;margin-bottom:18px;}
 
 /* Results */
@@ -298,8 +328,8 @@ if st.session_state.page_mode == "landing":
 
     with center:
         st.markdown(f"""
-        <div style='text-align:center;padding:40px 0;'>
-            <div class='rc-label' style='margin:0 auto 24px;'>{ic("zap",11,"#EA580C")} AI-Powered · Groq Accelerated · OWASP Top 10</div>
+        <div style='text-align:center;padding:40px 0 32px;'>
+            <div class='rc-label' style='margin:0 auto 24px;background:rgba(234,88,12,0.06);'>{ic("zap",11,"#EA580C")} AI-Powered · Groq Accelerated · OWASP Top 10</div>
             <div class='rc-h1' style='font-size:3.8rem;line-height:1.1;letter-spacing:-2.5px;max-width:800px;margin:0 auto 28px;'>
                 Find vulnerabilities<br>before they find <em>your users.</em>
             </div>
@@ -335,6 +365,49 @@ if st.session_state.page_mode == "landing":
             ph=ic("check",10,"#EA580C"), d=ic("check",10,"#EA580C"),
             o=ic("check",10,"#EA580C"),
         ), unsafe_allow_html=True)
+        st.markdown("<div style='height:56px;'></div>", unsafe_allow_html=True)
+
+        # ── Live pipeline terminal preview ───────────────────────────────
+        st.markdown(f"""
+        <div class='rc-terminal' style='box-shadow:0 24px 60px rgba(0,0,0,0.55),0 0 40px rgba(234,88,12,0.06);'>
+            <div class='rc-terminal-bar'>
+                <span class='rc-terminal-dot' style='background:#EF4444;'></span>
+                <span class='rc-terminal-dot' style='background:#FCD34D;'></span>
+                <span class='rc-terminal-dot' style='background:#22C55E;'></span>
+                <span style='margin-left:10px;font-size:0.68rem;color:#52525B;font-family:monospace;'>resiliocheck — analysis pipeline</span>
+            </div>
+            <div class='rc-terminal-body'>
+                <div><span class='rc-dim'>$</span> <span class='rc-white'>resiliocheck scan</span> <span class='rc-blue'>https://github.com/acme/payments-api</span></div>
+                <div><span class='rc-muted'>[gateway]</span>&nbsp;&nbsp;<span class='rc-green'>✓</span> <span class='rc-white'>Repository acquired · 18 source files extracted</span></div>
+                <div><span class='rc-muted'>[pre-scan]</span>&nbsp;<span class='rc-red'>✗</span> <span class='rc-yellow'>2 hardcoded secrets detected (AWS key · JWT token)</span></div>
+                <div><span class='rc-muted'>[ai-core]</span>&nbsp;&nbsp;<span class='rc-red'>✗</span> <span class='rc-white'>SQL Injection — <span class='rc-red'>CRITICAL</span> · routes/login.js:42</span></div>
+                <div><span class='rc-muted'>[ai-core]</span>&nbsp;&nbsp;<span class='rc-orange'>⚡</span> <span class='rc-white'>Hardened patch generated · parameterised queries applied</span></div>
+                <div><span class='rc-muted'>[sandbox]</span>&nbsp;&nbsp;<span class='rc-green'>✓</span> <span class='rc-white'>Docker validation · syntax + runtime checks passed</span></div>
+                <div><span class='rc-muted'>[gate]</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class='rc-orange'>▶</span> <span class='rc-white'>Verdict: <span class='rc-red'>BLOCKED</span> — secure patch PR opened for review</span></div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # ── How it works ────────────────────────────────────────────────
+        st.markdown(f"""
+        <div class='rc-steps'>
+            <div class='rc-step'>
+                <div class='rc-step-n'>1</div>
+                <div><div class='rc-step-title'>Submit a repository</div>
+                <div class='rc-step-desc'>Paste any public GitHub URL — the gateway validates it, downloads the code, and extracts scannable source files across nine languages.</div></div>
+            </div>
+            <div class='rc-step'>
+                <div class='rc-step-n'>2</div>
+                <div><div class='rc-step-title'>AI + regex dual analysis</div>
+                <div class='rc-step-desc'>A deterministic 17-pattern secret pre-scan runs first, then the Groq-accelerated LLM audits every OWASP Top 10 category and drafts a hardened patch.</div></div>
+            </div>
+            <div class='rc-step'>
+                <div class='rc-step-n'>3</div>
+                <div><div class='rc-step-title'>Sandbox verification &amp; gate</div>
+                <div class='rc-step-desc'>Patches are validated inside a network-isolated, capability-dropped Docker container before the binary APPROVED / BLOCKED gate decision.</div></div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
         st.markdown("<div style='height:60px;'></div>", unsafe_allow_html=True)
 
     # ── Stats band ────────────────────────────────────────────────────────────
@@ -380,8 +453,11 @@ if st.session_state.page_mode == "landing":
                 <div class='rc-card-tag'>{tag}</div>
             </div>""", unsafe_allow_html=True)
 
-    st.markdown("""
+    st.markdown(f"""
     <div class='rc-footer'>
+        <div style='display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:8px;color:#3F3F46;'>
+            {ic("shield",14,"#3F3F46")} <span style='font-weight:700;color:#52525B;'>ResilioCheck<span style='color:#EA580C;'>AI</span></span>
+        </div>
         © 2026 ResilioCheck AI &nbsp;·&nbsp; Dissertation Research Project &nbsp;·&nbsp; All rights reserved.
     </div>""", unsafe_allow_html=True)
 
@@ -428,7 +504,7 @@ elif st.session_state.page_mode == "login":
 # ║  DASHBOARD                                                                  ║
 # ╚══════════════════════════════════════════════════════════════════════════════╝
 elif st.session_state.page_mode == "dashboard":
-    _u = st.session_state.current_user or "Analyst"
+    _u = esc(st.session_state.current_user or "Analyst")
 
     with st.sidebar:
         st.markdown(f"""
@@ -463,7 +539,7 @@ elif st.session_state.page_mode == "dashboard":
             st.markdown(f'<div style="display:flex;align-items:center;gap:7px;font-size:0.78rem;color:{clr};padding:3px 0;">{ic(gi,12,clr)} <b>{gv}</b> <span style="color:#3F3F46;font-size:0.7rem;">— {gl}</span></div>', unsafe_allow_html=True)
 
         if st.session_state.ai_error:
-            st.markdown(f'<div style="margin-top:12px;font-size:0.7rem;color:#EF4444;word-break:break-word;padding:10px;background:#18181B;border-radius:8px;border:1px solid #27272A;">{ic("alert",12,"#EF4444")} {st.session_state.ai_error[:280]}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="margin-top:12px;font-size:0.7rem;color:#EF4444;word-break:break-word;padding:10px;background:#18181B;border-radius:8px;border:1px solid #27272A;">{ic("alert",12,"#EF4444")} {esc(st.session_state.ai_error[:280])}</div>', unsafe_allow_html=True)
 
         st.markdown("<div style='height:1px;background:#18181B;margin:14px 0;'></div>", unsafe_allow_html=True)
         if st.button("Sign Out", use_container_width=True, key="so"):
@@ -565,18 +641,32 @@ elif st.session_state.page_mode == "dashboard":
                                 st.session_state.get("secret_findings", [])
                             )
                             st.session_state.ai_explanation = explanation or "Analysis complete."
-                            st.session_state.pipeline_gates["ai_analysis"] = "APPROVED"
 
-                            if patched_code:
-                                st.session_state.ai_patched_files = {"patched_script.js": patched_code}
+                            # AI gate: BLOCKED when the model produced a patch
+                            # (i.e. vulnerabilities were found) or the pre-scan
+                            # detected hardcoded secrets — not blindly APPROVED.
+                            _has_secrets = bool(st.session_state.get("secret_findings"))
+                            if patched_code or _has_secrets:
+                                st.session_state.pipeline_gates["ai_analysis"] = "FAILED"
                                 st.session_state.ai_status = "FAILED"
-                                apply_patch_and_validate(WORKSPACE_DIR, patched_code)
                             else:
+                                st.session_state.pipeline_gates["ai_analysis"] = "APPROVED"
                                 st.session_state.ai_status = "APPROVED"
+
+                        # Sandbox gate: reflect the REAL Docker verdict instead
+                        # of unconditionally marking it APPROVED.
+                        if patched_code:
+                            st.session_state.ai_patched_files = {"patched_script.js": patched_code}
+                            with st.spinner("Stage 3 — Docker sandbox patch validation..."):
+                                _verdict = apply_patch_and_validate(WORKSPACE_DIR, patched_code)
+                            st.session_state.pipeline_gates["sandbox_validation"] = (
+                                "APPROVED" if _verdict in ("PASS", "SKIPPED") else "FAILED"
+                            )
+                        else:
                             st.session_state.pipeline_gates["sandbox_validation"] = "APPROVED"
-                            
+
                         st.session_state.pipeline_gates["rasp_monitoring"] = "APPROVED"
-                        
+
                         if db is not None:
                             try:
                                 data_payload = {
@@ -589,19 +679,28 @@ elif st.session_state.page_mode == "dashboard":
                                 db.collection("scans").document(doc_id).set(data_payload)
                             except Exception as e:
                                 st.error(f"Firestore save error: {e}")
+                    # ✅ Always clean up the downloaded repository workspace so
+                    # third-party code never lingers on disk between runs.
+                    shutil.rmtree(WORKSPACE_DIR, ignore_errors=True)
                     st.rerun()
                 except Exception as e:
                     st.session_state.pipeline_gates["webhook_ingestion"] = "FAILED"
                     st.session_state.pipeline_failures = st.session_state.get("pipeline_failures", 0) + 1
                     st.session_state.ai_error = f"Pipeline error: {e}"
                     st.error(f"Pipeline error: {e}")
+                    try:
+                        import shutil as _sh
+                        _sh.rmtree(WORKSPACE_DIR, ignore_errors=True)
+                    except Exception:
+                        pass
 
         if st.session_state.last_repo:
-            st.markdown(f'<div class="rc-chip">{ic("link",12,"#EA580C")} Last scan: <span>{st.session_state.last_repo}</span></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="rc-chip">{ic("link",12,"#EA580C")} Last scan: <span>{esc(st.session_state.last_repo)}</span></div>', unsafe_allow_html=True)
 
         if st.session_state.ai_explanation:
             st.markdown("<div style='height:20px;'></div>", unsafe_allow_html=True)
-            expl = st.session_state.ai_explanation
+            # ✅ SECURITY: AI/LLM output is untrusted — escape before HTML render.
+            expl = esc(st.session_state.ai_explanation)
             ai_status = st.session_state.get("ai_status", "BLOCKED")
             if ai_status == "APPROVED":
                 st.markdown(f'<div class="rc-ok"><b style="display:flex;align-items:center;gap:6px;">{ic("check",15,"#22C55E")} Security Verified — No Vulnerabilities Found</b><br>{expl}</div>', unsafe_allow_html=True)
@@ -614,12 +713,14 @@ elif st.session_state.page_mode == "dashboard":
             st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
             st.markdown(f'<div style="font-size:0.62rem;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;color:#EF4444;margin-bottom:10px;display:flex;align-items:center;gap:6px;">{ic("alert",12,"#EF4444")} Pre-Scan: {len(_sfindings)} Hardcoded Secret(s) Detected</div>', unsafe_allow_html=True)
             for _sf in _sfindings:
+                # ✅ SECURITY: snippets/filenames come from a scanned third-party
+                # repository — escape everything to block stored XSS.
                 st.markdown(f"""
                 <div style='background:#1C0A0A;border:1px solid #7F1D1D;border-radius:8px;padding:10px 14px;
                             margin-bottom:8px;font-size:0.78rem;font-family:monospace;'>
-                    <span style='color:#EF4444;font-weight:700;'>[{_sf["pattern"]}]</span>
-                    <span style='color:#71717A;'> {_sf["file"]} : line {_sf["line"]}</span><br>
-                    <span style='color:#A1A1AA;white-space:pre-wrap;'>{_sf["snippet"]}</span>
+                    <span style='color:#EF4444;font-weight:700;'>[{esc(_sf["pattern"])}]</span>
+                    <span style='color:#71717A;'> {esc(_sf["file"])} : line {esc(_sf["line"])}</span><br>
+                    <span style='color:#A1A1AA;white-space:pre-wrap;'>{esc(_sf["snippet"])}</span>
                 </div>""", unsafe_allow_html=True)
 
         if st.session_state.ai_patched_files:
@@ -667,17 +768,34 @@ elif st.session_state.page_mode == "dashboard":
         st.markdown("<div class='rc-sec'>📜 Historic Scan Records</div>", unsafe_allow_html=True)
         if db is not None:
             try:
-                for scan in db.collection("scans").stream():
+                _rows = list(db.collection("scans").stream())
+                if not _rows:
+                    st.caption("No historic scans recorded yet.")
+                for scan in _rows:
                     s_data = scan.to_dict()
-                    _repo = s_data.get("repo_url", "Unknown")
-                    _gate = s_data.get("pipeline_gates", {}).get("gate", "Unknown")
-                    _aid = s_data.get("analysis_id", "N/A")
-                    st.markdown(f"**{_repo}** — Gate Status: `{_gate}`")
-                    st.caption(f"Analysis ID: `{_aid}`")
+                    _repo  = esc(s_data.get("repo_url", "Unknown"))
+                    _gates = s_data.get("pipeline_gates", {}) or {}
+                    _ok    = all(v == "APPROVED" for v in _gates.values()) if _gates else False
+                    _gtxt  = "APPROVED" if _ok else "BLOCKED"
+                    _gclr  = "#22C55E" if _ok else "#EF4444"
+                    _aid   = esc(s_data.get("analysis_id", "N/A"))
+                    st.markdown(f"""
+                    <div style='background:#131316;border:1px solid #27272A;border-radius:10px;
+                                padding:12px 16px;margin-bottom:8px;display:flex;align-items:center;
+                                justify-content:space-between;gap:12px;'>
+                        <div style='min-width:0;'>
+                            <div style='font-size:0.82rem;font-weight:600;color:#E4E4E7;
+                                        overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'>{_repo}</div>
+                            <div style='font-size:0.68rem;color:#52525B;font-family:monospace;'>ID: {_aid}</div>
+                        </div>
+                        <div style='flex-shrink:0;font-size:0.66rem;font-weight:700;letter-spacing:1px;
+                                    color:{_gclr};border:1px solid {_gclr}33;background:{_gclr}14;
+                                    border-radius:20px;padding:3px 10px;'>{_gtxt}</div>
+                    </div>""", unsafe_allow_html=True)
             except Exception as e:
                 st.warning(f"Failed to load history: {e}")
         else:
-            st.info("Firestore not initialized.")
+            st.info("Firestore not initialized — historic scans unavailable in this environment.")
 
     with rc:
         st.markdown(f'<div style="font-size:0.62rem;font-weight:700;text-transform:uppercase;letter-spacing:1.4px;color:#52525B;margin-bottom:14px;display:flex;align-items:center;gap:6px;">{ic("layers",13,"#EA580C")} Pipeline Gate Status</div>', unsafe_allow_html=True)

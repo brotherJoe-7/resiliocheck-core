@@ -228,9 +228,21 @@ class GateDecisionAgent:
         logger.info("Running Gate Decision Agent via Groq API (model=%s)...", self.model)
         try:
             data = _call_groq(self.api_key, prompt, self.model)
+            # ✅ SECURITY: Validate the LLM output shape defensively — only accept
+            # a dict of str->str; anything else is discarded rather than crashing
+            # or propagating malformed data downstream to GitHub commits.
+            raw_patches = data.get("patched_files", {})
+            patched_files: Dict[str, str] = {}
+            if isinstance(raw_patches, dict):
+                for k, v in raw_patches.items():
+                    if isinstance(k, str) and isinstance(v, str) and v.strip():
+                        patched_files[k] = v
+            explanation = data.get("explanation", "Security patch applied.")
+            if not isinstance(explanation, str):
+                explanation = str(explanation)
             return GateDecision(
-                explanation=data.get("explanation", "Security patch applied."),
-                patched_files=data.get("patched_files", {}),
+                explanation=explanation,
+                patched_files=patched_files,
             )
         except Exception as e:
             logger.error("GateDecisionAgent Groq call failed: %s", e)

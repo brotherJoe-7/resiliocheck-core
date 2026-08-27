@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import tempfile
 import traceback
 import uuid
@@ -21,7 +22,16 @@ from pydantic import BaseModel
 
 logger = logging.getLogger("resiliocheck.sandbox")
 
-_CONTAINER_TIMEOUT_SECONDS: int = 120
+# Timeout is configurable via SANDBOX_TIMEOUT_SECONDS (see config/settings.py).
+try:
+    from config.settings import get_settings as _get_settings
+    _CONTAINER_TIMEOUT_SECONDS: int = _get_settings().sandbox_timeout_seconds
+except Exception:
+    _CONTAINER_TIMEOUT_SECONDS = 120
+
+# ✅ SECURITY: Image allowlist — the sandbox may only ever launch containers
+# from this pre-approved set (defence against image-name injection).
+_ALLOWED_IMAGES = {"python:3.10-slim", "node:18-alpine"}
 
 # ---------------------------------------------------------------------------
 # Models
@@ -178,15 +188,30 @@ fi
             host_path = os.path.abspath(tmpdir.name)
             logger.info("Launching container | lang=%s | path=%s", lang, host_path)
 
+            # ✅ SECURITY: Enforce the image allowlist before launch.
+            if image not in _ALLOWED_IMAGES:
+                raise ValueError(f"Image {image!r} is not in the sandbox allowlist.")
+
             container = self._client.containers.run(
                 image=image,
                 command=["/bin/sh", "/app/run_harness.sh"],
                 volumes={host_path: {"bind": "/app", "mode": "rw"}},
                 detach=True,
-                # ✅ SECURITY: Disable all outbound networking so untrusted / LLM-
-                # generated code cannot make SSRF calls or exfiltrate data.
+                # ✅ SECURITY: Hardened container profile (see README):
+                #   - no outbound networking (no SSRF / data exfiltration)
+                #   - read-only root filesystem (only /app volume is writable)
+                #   - all Linux capabilities dropped
+                #   - privilege escalation disabled
+                #   - memory / CPU / process-count limits
                 network_disabled=True,
-                mem_limit="256m",
+                read_only=True,
+                tmpfs={"/tmp": "size=32m"},
+                cap_drop=["ALL"],
+                security_opt=["no-new-privileges:true"],
+                mem_limit="512m",
+                cpu_period=100_000,
+                cpu_quota=50_000,   # 50 % of one core
+                pids_limit=64,
             )
 
             exit_code = container.wait(timeout=_CONTAINER_TIMEOUT_SECONDS)["StatusCode"]

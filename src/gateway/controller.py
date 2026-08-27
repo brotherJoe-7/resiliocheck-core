@@ -6,13 +6,17 @@ ResilioCheck FastAPI Webhook Controller — Module 1: Integration Gateway
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
 import os
+import re
 import shutil
 import subprocess
 import traceback
 import uuid
 import zipfile
+from collections import OrderedDict
 from io import BytesIO
 from pathlib import Path
 from typing import Literal, Dict
@@ -22,6 +26,13 @@ from github import Github
 from fastapi import FastAPI, Header, HTTPException, Request, status, BackgroundTasks
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, HttpUrl, field_validator
+
+# ✅ SECURITY: strict owner/repo format — GitHub usernames and repo names only
+# permit alphanumerics, hyphens, underscores and dots. Everything else
+# (path traversal, shell metacharacters, URL tricks) is rejected up-front.
+_FULL_NAME_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9\-]{0,38})/[A-Za-z0-9._\-]{1,100}$")
+_HEX_SHA_RE   = re.compile(r"^[0-9a-fA-F]{7,40}$")
+_BRANCH_RE    = re.compile(r"^[A-Za-z0-9._\-/]{1,255}$")
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -56,13 +67,17 @@ class RepositoryPayload(BaseModel):
     @field_validator("full_name")
     @classmethod
     def _no_path_traversal(cls, v: str) -> str:
-        forbidden = {"..", "\\", "<", ">", ";", "&", "|", "`"}
-        for char in forbidden:
-            if char in v and char not in {"/"}:
-                raise ValueError(f"Illegal character in full_name: {char!r}")
-        parts = v.split("/")
-        if len(parts) != 2 or not all(p.strip() for p in parts):
-            raise ValueError("full_name must be in 'owner/repo' format.")
+        # ✅ SECURITY: allowlist regex — rejects '..', backslashes, shell
+        # metacharacters and anything not matching GitHub's 'owner/repo' rules.
+        if not _FULL_NAME_RE.fullmatch(v) or ".." in v:
+            raise ValueError("full_name must be in valid 'owner/repo' format.")
+        return v
+
+    @field_validator("default_branch")
+    @classmethod
+    def _validate_branch(cls, v: str) -> str:
+        if not _BRANCH_RE.fullmatch(v) or ".." in v:
+            raise ValueError("default_branch contains invalid characters.")
         return v
 
 class WebhookPayload(BaseModel):
@@ -74,14 +89,15 @@ class WebhookPayload(BaseModel):
     @field_validator("head_commit_sha")
     @classmethod
     def _validate_sha(cls, v: str) -> str:
-        if not v.isalnum() or len(v) not in {7, 40}:
-            raise ValueError("head_commit_sha must be a 7 or 40 hex character SHA.")
+        # ✅ SECURITY: strict hex whitelist per README — `isalnum()` alone would
+        # accept non-hex strings like 'zzzzzzz'.
+        if not _HEX_SHA_RE.fullmatch(v):
+            raise ValueError("head_commit_sha must be a 7 to 40 hex character SHA.")
         return v.lower()
 
     @field_validator("sender_login")
     @classmethod
     def _validate_login(cls, v: str) -> str:
-        import re
         if not re.fullmatch(r"[A-Za-z0-9\-]{1,39}", v):
             raise ValueError("sender_login contains invalid characters.")
         return v
@@ -90,12 +106,33 @@ class ManualAnalysisRequest(BaseModel):
     repo_url: str
     branch: str
     sender: str
-    
+
     @field_validator("repo_url")
     @classmethod
     def _validate_repo_url(cls, v: str) -> str:
+        # ✅ SECURITY: must be an https GitHub URL whose path resolves to a
+        # strictly valid 'owner/repo' — blocks SSRF and path tricks like
+        # 'https://github.com/../..' or 'https://github.com@evil.com/'.
+        v = v.strip()
         if not v.startswith("https://github.com/"):
             raise ValueError("repo_url must point to https://github.com/ to prevent SSRF.")
+        path = v[len("https://github.com/"):].removesuffix(".git").strip("/")
+        if not _FULL_NAME_RE.fullmatch(path):
+            raise ValueError("repo_url must be in the form https://github.com/owner/repo")
+        return v
+
+    @field_validator("branch")
+    @classmethod
+    def _validate_branch(cls, v: str) -> str:
+        if not _BRANCH_RE.fullmatch(v) or ".." in v:
+            raise ValueError("branch contains invalid characters.")
+        return v
+
+    @field_validator("sender")
+    @classmethod
+    def _validate_sender(cls, v: str) -> str:
+        if not re.fullmatch(r"[A-Za-z0-9._@\-]{1,64}", v):
+            raise ValueError("sender contains invalid characters.")
         return v
 
 # ---------------------------------------------------------------------------
@@ -106,11 +143,22 @@ class ManualAnalysisRequest(BaseModel):
 # hostnames that change between local dev and cloud deployments.
 try:
     from config.settings import get_settings as _get_settings
-    _ENGINE_URL = str(_get_settings().engine_url).rstrip("/") + "/analyze"
+    _ENGINE_BASE = str(_get_settings().engine_url).rstrip("/")
 except Exception:
-    _ENGINE_URL = "http://localhost:8001/analyze"
+    _ENGINE_BASE = "http://localhost:8001"
+_ENGINE_URL = _ENGINE_BASE + "/analyze"
 
-_status_store: Dict[str, Dict] = {}
+# ✅ SECURITY / STABILITY: Bounded status store — an unbounded dict keyed by
+# attacker-controllable request volume is a memory-exhaustion (DoS) vector.
+_STATUS_STORE_MAX = 500
+_status_store: "OrderedDict[str, Dict]" = OrderedDict()
+
+
+def _store_status(analysis_id: str, value: Dict) -> None:
+    _status_store[analysis_id] = value
+    _status_store.move_to_end(analysis_id)
+    while len(_status_store) > _STATUS_STORE_MAX:
+        _status_store.popitem(last=False)
 
 # Safe writable workspace — avoids Windows temp-dir permission errors.
 _WORKSPACE_ROOT = Path("tmp_workspace")
@@ -150,11 +198,20 @@ def _clone_or_download(clone_url: str, dest: Path) -> bool:
         logger.info("Attempting ZIP download from %s", zip_url)
         resp = requests.get(zip_url, timeout=120, stream=True)
         resp.raise_for_status()
+        # ✅ SECURITY: cap archive size (100 MB) to prevent memory-exhaustion DoS
+        # from an adversarially large repository archive.
+        _MAX_ZIP_BYTES = 100 * 1024 * 1024
+        buf = BytesIO()
+        for chunk in resp.iter_content(chunk_size=1 << 16):
+            buf.write(chunk)
+            if buf.tell() > _MAX_ZIP_BYTES:
+                raise RuntimeError("Repository archive exceeds the 100 MB safety limit.")
+        buf.seek(0)
         # ✅ SECURITY: Sanitise every ZIP member before extraction to prevent
         # path-traversal (CWE-22). An adversarial repo ZIP could contain entries
         # like '../../etc/cron.d/evil' that escape the workspace directory.
         dest_abs = str(dest.resolve())
-        with zipfile.ZipFile(BytesIO(resp.content)) as zf:
+        with zipfile.ZipFile(buf) as zf:
             for member in zf.namelist():
                 member_path = os.path.realpath(os.path.join(dest_abs, member))
                 if not member_path.startswith(dest_abs + os.sep) and member_path != dest_abs:
@@ -176,13 +233,13 @@ def _clone_or_download(clone_url: str, dest: Path) -> bool:
 
 def _run_analysis_background(analysis_id: str, engine_envelope: dict, clone_url: str):
     logger.info("Background task started for %s", analysis_id)
-    _status_store[analysis_id] = {
+    _store_status(analysis_id, {
         "webhook_ingestion": "PENDING",
         "ai_analysis": "PENDING",
         "sandbox_validation": "PENDING",
         "rasp_monitoring": "PENDING",
         "gate": "PENDING"
-    }
+    })
 
     source_code: Dict[str, str] = {}
     # Create a unique, writable workspace under ./tmp_workspace
@@ -256,8 +313,13 @@ def _run_analysis_background(analysis_id: str, engine_envelope: dict, clone_url:
                 if not github_token:
                     logger.error("No GITHUB_TOKEN configured. Skipping PR creation.")
                 else:
-                    repo_full_name = engine_envelope.get("repo")
-                    res = requests.get(f"http://localhost:8001/result/{analysis_id}")
+                    repo_full_name = engine_envelope.get("repo", "")
+                    # ✅ SECURITY: validate before handing to the GitHub API client.
+                    if not _FULL_NAME_RE.fullmatch(repo_full_name):
+                        raise ValueError("Invalid repository full name for PR creation.")
+                    # Use the configured engine URL (never a hardcoded hostname)
+                    # and always set a timeout on outbound requests.
+                    res = requests.get(f"{_ENGINE_BASE}/result/{analysis_id}", timeout=30)
                     if res.ok:
                         data = res.json()
                         patched_code = data.get("patched_code")
@@ -313,12 +375,36 @@ def _run_analysis_background(analysis_id: str, engine_envelope: dict, clone_url:
 # Routes
 # ---------------------------------------------------------------------------
 
+def _verify_webhook_signature(raw_body: bytes, signature_header: str) -> None:
+    """
+    ✅ SECURITY: Verify GitHub's `X-Hub-Signature-256` HMAC when a
+    GITHUB_WEBHOOK_SECRET is configured. Uses constant-time comparison to
+    prevent timing attacks. If no secret is configured (local development),
+    verification is skipped but logged.
+    """
+    try:
+        secret = _get_settings().github_webhook_secret or os.getenv("GITHUB_WEBHOOK_SECRET", "")
+    except Exception:
+        secret = os.getenv("GITHUB_WEBHOOK_SECRET", "")
+    if not secret:
+        logger.warning("GITHUB_WEBHOOK_SECRET not set — webhook signature verification skipped.")
+        return
+    if not signature_header.startswith("sha256="):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing webhook signature.")
+    expected = "sha256=" + hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, signature_header):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook signature.")
+
+
 @app.post("/webhook", status_code=status.HTTP_202_ACCEPTED)
 async def receive_webhook(
+    request: Request,
     payload: WebhookPayload,
     background_tasks: BackgroundTasks,
     x_github_event: str = Header(default="", alias="X-GitHub-Event"),
+    x_hub_signature_256: str = Header(default="", alias="X-Hub-Signature-256"),
 ) -> JSONResponse:
+    _verify_webhook_signature(await request.body(), x_hub_signature_256)
     analysis_id = str(uuid.uuid4())
     logger.info("Webhook received | event=%s | repo=%s | sha=%s", payload.event_type, payload.repository.full_name, payload.head_commit_sha)
 
@@ -349,10 +435,9 @@ async def analyze_manual(
     analysis_id = str(uuid.uuid4())
     logger.info("Manual analysis triggered | repo=%s", payload.repo_url)
     
-    # Extract owner/repo
-    full_name = payload.repo_url.replace("https://github.com/", "").replace(".git", "").strip("/")
-    if full_name.endswith("/"):
-        full_name = full_name[:-1]
+    # Extract owner/repo — removesuffix only strips a trailing '.git'
+    # (str.replace would corrupt names containing '.git' mid-string).
+    full_name = payload.repo_url[len("https://github.com/"):].removesuffix(".git").strip("/")
     
     engine_envelope = {
         "event_type": "manual",
@@ -376,6 +461,12 @@ async def analyze_manual(
 
 @app.get("/status/{analysis_id}")
 async def get_status(analysis_id: str) -> dict:
+    # ✅ SECURITY: analysis IDs are server-generated UUIDs — reject anything else
+    # so this endpoint cannot be used to probe with arbitrary keys.
+    try:
+        uuid.UUID(analysis_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Analysis ID not found")
     if analysis_id in _status_store:
         return _status_store[analysis_id]
     raise HTTPException(status_code=404, detail="Analysis ID not found")
