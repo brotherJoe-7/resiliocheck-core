@@ -5,26 +5,38 @@ import { useAuth } from '../../context/AuthContext';
 import { useRouter } from 'next/navigation';
 
 export default function AdminPage() {
-  const { user, token } = useAuth();
+  const { user, token, loading: authLoading } = useAuth();
   const router = useRouter();
   const [users, setUsers] = useState<any[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!user) { router.push('/login'); return; }
+    // Wait until AuthContext has finished restoring session from localStorage
+    if (authLoading) return;
+    if (!user || !token) { router.push('/login'); return; }
     if (user.role !== 'superadmin' && user.role !== 'admin') { router.push('/dashboard'); return; }
 
     const headers = { Authorization: `Bearer ${token}` };
     Promise.all([
-      fetch('http://localhost:8000/api/admin/users', { headers }).then(r => r.json()),
-      fetch('http://localhost:8000/api/admin/stats', { headers }).then(r => r.json()),
+      fetch('http://localhost:8000/api/admin/users', { headers }).then(r => {
+        if (!r.ok) throw new Error(`Users fetch failed: ${r.status}`);
+        return r.json();
+      }),
+      fetch('http://localhost:8000/api/admin/stats', { headers }).then(r => {
+        if (!r.ok) throw new Error(`Stats fetch failed: ${r.status}`);
+        return r.json();
+      }),
     ]).then(([u, s]) => {
-      setUsers(u);
+      setUsers(Array.isArray(u) ? u : []);
       setStats(s);
       setLoading(false);
-    }).catch(console.error);
-  }, [user, token]);
+    }).catch(err => {
+      setError(err.message);
+      setLoading(false);
+    });
+  }, [user, token, authLoading]);
 
   async function updateRole(userId: number, newRole: string) {
     await fetch(`http://localhost:8000/api/admin/users/${userId}/role?role=${newRole}`, {
@@ -71,6 +83,12 @@ export default function AdminPage() {
                 <div style={{ fontSize: '2rem', fontWeight: 800 }}>{k.value}</div>
               </div>
             ))}
+          </div>
+        )}
+
+        {error && (
+          <div style={{ margin: '0 0 20px', padding: '12px 16px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 8, color: 'var(--red)', fontSize: '0.85rem' }}>
+            ⚠ {error} — Make sure the FastAPI backend is running on port 8000 and you are logged in.
           </div>
         )}
 
