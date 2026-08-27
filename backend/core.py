@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL   = os.getenv("GROQ_MODEL", "llama3-8b-8192")
+GROQ_MODEL   = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 
 # NOTE: The key is validated lazily inside run_ai_analysis() instead of at
 # import time — the dashboard imports helper functions from this module and a
@@ -304,10 +304,12 @@ def run_ai_analysis(source_files, secret_findings=None):
         "Content-Type":  "application/json",
     }
     payload = {
-        "model":           GROQ_MODEL,
-        "messages":        [{"role": "user", "content": prompt}],
-        "temperature":     0.0,
-        "response_format": {"type": "json_object"},
+        "model":       GROQ_MODEL,
+        "messages":    [{"role": "user", "content": prompt}],
+        "temperature": 0.0,
+        # NOTE: Do NOT use response_format json_object — some models emit empty
+        # failed_generation when the prompt contains code with special chars.
+        # We extract JSON manually from the response text instead.
     }
 
     try:
@@ -324,11 +326,21 @@ def run_ai_analysis(source_files, secret_findings=None):
         first       = choices[0] if choices else {}
         raw_content = (first.get("message") or {}).get("content", "{}")
 
+        # First try direct JSON parse
+        ai_data = {}
         try:
             ai_data = json.loads(raw_content)
         except json.JSONDecodeError:
-            print("AI returned non-JSON content — treating as empty result.")
-            ai_data = {}
+            # Fallback: extract first {...} block from the response
+            match = re.search(r'\{[\s\S]*\}', raw_content)
+            if match:
+                try:
+                    ai_data = json.loads(match.group(0))
+                except json.JSONDecodeError:
+                    pass
+            if not ai_data:
+                # Last resort: treat entire response as the explanation
+                ai_data = {"explanation": raw_content.strip(), "patched_code": ""}
 
         explanation  = ai_data.get("explanation", "Code verification processed.")
         patched_code = ai_data.get("patched_code", "")
