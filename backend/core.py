@@ -346,7 +346,10 @@ def run_ai_analysis(source_files, secret_findings=None):
         patched_code = ai_data.get("patched_code", "")
 
         print("\nAI Explanation:")
-        print(explanation)
+        try:
+            print(explanation)
+        except UnicodeEncodeError:
+            print(explanation.encode('ascii', 'ignore').decode('ascii'))
         return explanation, patched_code
 
     except Exception as e:
