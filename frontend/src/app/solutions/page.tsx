@@ -15,7 +15,7 @@ const solutions = [
   },
   {
     tag: 'Open Source', icon: '🌍',
-    headline: 'Protect Your Community's Codebase',
+    headline: "Protect Your Community's Codebase",
     desc: 'Maintainers of open source projects face unique security challenges — pull requests from unknown contributors, secret leaks in commit history, and dependency vulnerabilities. ResilioCheck AI\'s Community plan is free for public repositories.',
     points: ['Free for public GitHub repositories', 'Secret scanning on every PR', 'Dependency CVE detection', 'Community support forum'],
   },
