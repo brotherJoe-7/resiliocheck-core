@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     engine_url: AnyHttpUrl = Field(
         default="http://localhost:8001",          alias="ENGINE_URL"
     )
+    sandbox_url: AnyHttpUrl = Field(
+        default="http://localhost:8002",          alias="SANDBOX_URL"
+    )
     dashboard_port: int = Field(default=8501,    alias="DASHBOARD_PORT")
 
     # ── AI / LLM ─────────────────────────────────────────────────────────────
@@ -44,6 +47,8 @@ class Settings(BaseSettings):
 
     # ── GitHub ───────────────────────────────────────────────────────────────
     github_token: str = Field(default="",        alias="GITHUB_TOKEN")
+    # HMAC secret used to verify GitHub webhook signatures (X-Hub-Signature-256).
+    github_webhook_secret: str = Field(default="", alias="GITHUB_WEBHOOK_SECRET")
 
     # ── ChromaDB ─────────────────────────────────────────────────────────────
     chroma_persist_dir: str = Field(

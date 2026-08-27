@@ -10,11 +10,43 @@ from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_MODEL   = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
-if not GROQ_API_KEY:
-    print("ERROR: GROQ_API_KEY is missing from .env")
-    raise RuntimeError("GROQ_API_KEY is required. Set it in your .env file and restart.")
+# NOTE: The key is validated lazily inside run_ai_analysis() instead of at
+# import time — the dashboard imports helper functions from this module and a
+# module-level RuntimeError would crash the whole Streamlit app on startup.
+
+
+def _require_api_key() -> None:
+    if not GROQ_API_KEY:
+        raise RuntimeError("GROQ_API_KEY is required. Set it in your .env file and restart.")
+
+
+# ✅ SECURITY: strict GitHub 'owner/repo' allowlist — used to validate every
+# repository URL before any network request is made (SSRF prevention).
+_REPO_PATH_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9\-]{0,38})/[A-Za-z0-9._\-]{1,100}$")
+
+# ✅ SECURITY: cap downloaded archive size (100 MB) to prevent memory-
+# exhaustion DoS from adversarially large repositories.
+_MAX_ZIP_BYTES = 100 * 1024 * 1024
+
+
+def validate_repo_url(repo_url: str) -> str:
+    """
+    Validate that *repo_url* is a well-formed public GitHub repository URL.
+    Returns the normalised URL or raises ValueError.
+    Blocks SSRF vectors like 'https://github.com@evil.com/x' or internal hosts.
+    """
+    url = repo_url.strip().rstrip("/")
+    if not url.startswith("https://github.com/"):
+        raise ValueError("Only https://github.com/ repository URLs are accepted.")
+    path = url[len("https://github.com/"):]
+    if path.endswith(".git"):
+        path = path[:-4]
+    if not _REPO_PATH_RE.fullmatch(path):
+        raise ValueError("Repository URL must be in the form https://github.com/owner/repo")
+    return f"https://github.com/{path}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -25,7 +57,7 @@ if not GROQ_API_KEY:
 SECRET_PATTERNS = [
     ("Generic API Key",         re.compile(r'(?i)(api[_-]?key|apikey)\s*[=:]\s*["\']?([A-Za-z0-9\-_]{20,})["\']?')),
     ("Generic Secret/Token",    re.compile(r'(?i)(secret|token|passwd|password|auth_token|access_token)\s*[=:]\s*["\']([^"\']{8,})["\']')),
-    ("AWS Access Key",          re.compile(r'(?<![A-Z0-9])(AKIA|AIPA|AKIA|AROA|ASIA)[A-Z0-9]{16}(?![A-Z0-9])')),
+    ("AWS Access Key",          re.compile(r'(?<![A-Z0-9])(AKIA|AIPA|AROA|ASIA)[A-Z0-9]{16}(?![A-Z0-9])')),
     ("AWS Secret Key",          re.compile(r'(?i)aws[_-]?secret[_-]?access[_-]?key\s*[=:]\s*["\']?([A-Za-z0-9/+=]{40})["\']?')),
     ("Google API Key",          re.compile(r'AIza[0-9A-Za-z\-_]{35}')),
     ("Google OAuth Client",     re.compile(r'[0-9]+-[0-9A-Za-z_]{32}\.apps\.googleusercontent\.com')),
@@ -74,25 +106,38 @@ SKIP_FILENAMES = {
 
 
 def download_and_extract_repo(repo_url, target_dir):
+    # ✅ SECURITY: validate + normalise the URL before any request (SSRF guard).
+    repo_url = validate_repo_url(repo_url)
     print(f"Downloading repository from {repo_url}...")
-    if repo_url.endswith("/"):
-        repo_url = repo_url[:-1]
-
-    downloaded = False
-    for branch in ("main", "master"):
-        zip_url = f"{repo_url}/archive/refs/heads/{branch}.zip"
-        response = requests.get(zip_url, timeout=20)
-        if response.status_code == 200:
-            downloaded = True
-            break
-        print(f"Branch '{branch}' not found, trying next...")
-
-    if not downloaded:
-        raise RuntimeError(f"Failed to download repository — neither main nor master branch found.")
 
     zip_path = os.path.join(target_dir, "repo.zip")
-    with open(zip_path, "wb") as f:
-        f.write(response.content)
+    downloaded = False
+    # 'HEAD' resolves to the default branch automatically; keep main/master
+    # as explicit fallbacks for older mirrors.
+    for ref in ("HEAD", "refs/heads/main", "refs/heads/master"):
+        zip_url = f"{repo_url}/archive/{ref}.zip"
+        try:
+            response = requests.get(zip_url, timeout=30, stream=True)
+        except requests.RequestException as exc:
+            print(f"Request for '{ref}' failed: {exc}")
+            continue
+        if response.status_code == 200:
+            # ✅ SECURITY: stream to disk with a hard size cap.
+            written = 0
+            with open(zip_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=1 << 16):
+                    written += len(chunk)
+                    if written > _MAX_ZIP_BYTES:
+                        f.close()
+                        os.remove(zip_path)
+                        raise RuntimeError("Repository archive exceeds the 100 MB safety limit.")
+                    f.write(chunk)
+            downloaded = True
+            break
+        print(f"Ref '{ref}' not found (HTTP {response.status_code}), trying next...")
+
+    if not downloaded:
+        raise RuntimeError("Failed to download repository — no default/main/master branch found.")
 
     print("Extracting files...")
     # SECURITY: Sanitise every ZIP member to prevent path-traversal (CWE-22).
@@ -213,6 +258,7 @@ def run_ai_analysis(source_files, secret_findings=None):
 
     Returns a tuple: (explanation: str, patched_code: str)
     """
+    _require_api_key()
     print("Sending code to Groq AI for security analysis...")
 
     # Build the prompt — language-agnostic, OWASP Top 10 focused
@@ -261,7 +307,7 @@ def run_ai_analysis(source_files, secret_findings=None):
         "Content-Type":  "application/json",
     }
     payload = {
-        "model":           "llama-3.3-70b-versatile",
+        "model":           GROQ_MODEL,
         "messages":        [{"role": "user", "content": prompt}],
         "temperature":     0.0,
         "response_format": {"type": "json_object"},
@@ -302,50 +348,80 @@ def run_ai_analysis(source_files, secret_findings=None):
 
 
 def apply_patch_and_validate(workspace_dir, patched_code):
+    """
+    Writes the AI-generated patch to disk and syntax-validates it inside a
+    hardened, network-isolated Docker container.
+
+    Returns one of: "PASS", "FAIL", "SKIPPED", "ERROR" so callers (CLI and
+    dashboard) can surface the real sandbox verdict instead of guessing.
+    """
     patched_file_path = os.path.join(workspace_dir, "patched_script.js")
 
     if not (patched_code and patched_code.strip()):
         print("No patched code generated (code is clean or non-JS).")
-        return
+        return "SKIPPED"
 
     print(f"Writing patched code to {patched_file_path}")
     with open(patched_file_path, "w", encoding="utf-8") as f:
         f.write(patched_code)
 
     print("Running Docker Sandbox Validation...")
+    container = None
     try:
-        client      = docker.from_env()
+        client        = docker.from_env()
         abs_workspace = os.path.abspath(workspace_dir)
 
         container = client.containers.run(
             "node:18-alpine",
             command="node --check /workspace/patched_script.js",
             volumes={abs_workspace: {"bind": "/workspace", "mode": "ro"}},
-            network_disabled=True,  # SECURITY: no outbound from sandbox
+            # ✅ SECURITY: hardened profile — no network, read-only root fs,
+            # no capabilities, no privilege escalation, resource limits.
+            network_disabled=True,
+            read_only=True,
+            cap_drop=["ALL"],
+            security_opt=["no-new-privileges:true"],
+            mem_limit="512m",
+            pids_limit=64,
             detach=True,
             remove=False,
         )
 
-        exit_status = container.wait()
-        logs        = container.logs().decode("utf-8")
+        exit_status = container.wait(timeout=120)
+        logs        = container.logs().decode("utf-8", errors="replace")
 
         if exit_status["StatusCode"] == 0:
             print("Sandbox Validation: PASS")
-        else:
-            print("Sandbox Validation: FAIL")
-            print(logs)
-
-        container.remove()
+            return "PASS"
+        print("Sandbox Validation: FAIL")
+        print(logs)
+        return "FAIL"
 
     except Exception as e:
         print(f"ERROR: Docker validation failed: {str(e)}")
+        return "ERROR"
+    finally:
+        # ✅ Always clean up the container — the previous version leaked
+        # containers whenever wait()/logs() raised before remove().
+        if container is not None:
+            try:
+                container.remove(force=True)
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
+    _require_api_key()
     repo_url = input("Enter Public GitHub Repository URL: ").strip()
 
     if not repo_url:
         print("ERROR: Repository URL is required.")
+        exit(1)
+
+    try:
+        repo_url = validate_repo_url(repo_url)
+    except ValueError as ve:
+        print(f"ERROR: {ve}")
         exit(1)
 
     WORKSPACE_DIR = "./tmp_workspace"
@@ -377,7 +453,11 @@ if __name__ == "__main__":
 
             # Stage 3: Docker sandbox validation (JS patches only)
             if patched_code:
-                apply_patch_and_validate(WORKSPACE_DIR, patched_code)
+                verdict = apply_patch_and_validate(WORKSPACE_DIR, patched_code)
+                print(f"Final sandbox verdict: {verdict}")
 
     finally:
+        # ✅ Clean up the downloaded workspace so repository contents never
+        # linger on disk (or get committed) after a run.
+        shutil.rmtree(WORKSPACE_DIR, ignore_errors=True)
         print("\nExecution finished.")

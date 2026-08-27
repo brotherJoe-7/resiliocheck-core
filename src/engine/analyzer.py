@@ -7,14 +7,17 @@ ResilioCheck AI Core — Module 2: LangChain Multi-Agent Engine
 from __future__ import annotations
 
 import logging
+import os
+import re
 import time
 import traceback
 import uuid
+from collections import OrderedDict
 from typing import Literal, Dict
 
 import requests
-from fastapi import FastAPI
-from pydantic import BaseModel, HttpUrl, field_validator
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, field_validator
 
 from config.settings import get_settings
 from .agents import CodeChunkingAgent, EmbeddingAgent, OWASPAgent, GateDecisionAgent
@@ -38,11 +41,11 @@ class AnalysisRequest(BaseModel):
     @field_validator("sha")
     @classmethod
     def _validate_sha(cls, v: str) -> str:
-        # Accept standard git SHAs (7 or 40 hex chars) or manual run tokens
+        # Accept standard git SHAs (7-40 hex chars) or manual run tokens
         if v.startswith("manual_run_"):
             return v
-        if not v.isalnum() or len(v) not in {7, 40}:
-            raise ValueError("sha must be a 7 or 40 hex character SHA or a manual_run token.")
+        if not re.fullmatch(r"[0-9a-fA-F]{7,40}", v):
+            raise ValueError("sha must be a 7 to 40 hex character SHA or a manual_run token.")
         return v.lower()
 
 class AnalysisResult(BaseModel):
@@ -60,16 +63,33 @@ class AnalysisResult(BaseModel):
 # Orchestrator
 # ---------------------------------------------------------------------------
 
-_SANDBOX_URL = "http://localhost:8002/sandbox"
-_results_store: Dict[str, dict] = {}
+# ✅ Sandbox URL sourced from centralised settings — never hardcode service
+# hostnames that change between local dev and cloud deployments.
+try:
+    _SANDBOX_URL = str(get_settings().sandbox_url).rstrip("/") + "/sandbox"
+except Exception:
+    _SANDBOX_URL = os.getenv("SANDBOX_URL", "http://localhost:8002").rstrip("/") + "/sandbox"
+
+# ✅ STABILITY: Bounded results store to prevent unbounded memory growth (DoS).
+_RESULTS_STORE_MAX = 500
+_results_store: "OrderedDict[str, dict]" = OrderedDict()
 _START_TIME = time.time()
+
+
+def _store_result(analysis_id: str, value: dict) -> None:
+    _results_store[analysis_id] = value
+    _results_store.move_to_end(analysis_id)
+    while len(_results_store) > _RESULTS_STORE_MAX:
+        _results_store.popitem(last=False)
 
 class AnalysisOrchestrator:
     def __init__(self):
         self._settings = get_settings()
         self.groq_api_key = self._settings.groq_api_key
-        self._model = self._settings.groq_model or "llama-3.1-70b-versatile"
-        
+        # NOTE: fallback must be a currently supported Groq model —
+        # llama-3.1-70b-versatile has been decommissioned.
+        self._model = self._settings.groq_model or "llama-3.3-70b-versatile"
+
         # Initialize agents
         self.chunking_agent = CodeChunkingAgent()
         self.embedding_agent = EmbeddingAgent()
@@ -80,8 +100,7 @@ class AnalysisOrchestrator:
             self.owasp_agent = None
             self.gate_agent = None
             
-        import os
-        github_token = os.getenv("GITHUB_TOKEN")
+        github_token = os.getenv("GITHUB_TOKEN") or self._settings.github_token
         self.github_app = GitHubApp(github_token) if github_token else None
 
     def run(self, request: AnalysisRequest) -> AnalysisResult:
@@ -130,11 +149,17 @@ class AnalysisOrchestrator:
                             self.github_app.commit_file(request.repo, new_branch, fpath, new_content, f"Fix vulnerabilities in {fpath}")
                         
                         pr_title = "[ResilioCheck AI] Security Patch"
-                        pr_body = f"## Automated Security Fix\\n\\n**Analysis ID:** {analysis_id}\\n\\n**Explanation:**\\n{explanation}"
+                        # Real newlines (a previous revision emitted literal '\n'
+                        # two-character sequences into the PR body).
+                        pr_body = (
+                            "## Automated Security Fix\n\n"
+                            f"**Analysis ID:** {analysis_id}\n\n"
+                            f"**Explanation:**\n{explanation}"
+                        )
                         pr_url, pr_number = self.github_app.create_pull_request(request.repo, new_branch, base_branch, pr_title, pr_body)
                     except Exception as gh_e:
                         logger.error("Failed to create GitHub PR: %s", gh_e)
-                        explanation += f"\\n\\n[GitHub PR Failed]: {str(gh_e)}"
+                        explanation += f"\n\n[GitHub PR Failed]: {str(gh_e)}"
 
                 if owasp_report.is_secure:
                     ai_status = "APPROVED"
@@ -149,13 +174,13 @@ class AnalysisOrchestrator:
                         sandbox_source_code = request.source_code
                     findings_summary = f"Found {len(owasp_report.findings)} vulnerability/ies."
 
-                _results_store[analysis_id] = {
+                _store_result(analysis_id, {
                     "explanation": explanation,
                     "patched_files": patched_files,
                     "pr_url": pr_url,
                     "pr_number": pr_number,
                     "ai_status": ai_status
-                }
+                })
 
             except Exception as e:
                 # ✅ SECURITY: Log multi-agent crash cleanly to stdout and structured
@@ -168,13 +193,13 @@ class AnalysisOrchestrator:
                 patched_files = {}
                 findings_summary = "Fallback triggered."
 
-                _results_store[analysis_id] = {
+                _store_result(analysis_id, {
                     "explanation": explanation,
                     "patched_files": patched_files,
                     "pr_url": "",
                     "pr_number": None,
                     "ai_status": "BLOCKED"
-                }
+                })
                 ai_status = "BLOCKED"
                 sandbox_status = "BLOCKED"
                 # sandbox_source_code retains its safe initialisation from above
@@ -197,24 +222,32 @@ class AnalysisOrchestrator:
                 sandbox_status = "BLOCKED"
             
             gate = "APPROVED" if (ai_status == "APPROVED" and sandbox_status == "APPROVED") else "BLOCKED"
-            
+
+            # Derive severity counts from the OWASP report so the AnalysisResult
+            # reflects reality instead of hardcoded zeros.
             has_vulns = False
-            if 'owasp_report' in locals() and not owasp_report.is_secure:
-                has_vulns = True
-                
-            _results_store[analysis_id].update({
-                "gate": gate,
-                "has_vulnerabilities": has_vulns
-            })
-            
+            critical_count = 0
+            high_count = 0
+            if 'owasp_report' in locals():
+                if not owasp_report.is_secure:
+                    has_vulns = True
+                critical_count = sum(1 for f in owasp_report.findings if f.severity.upper() == "CRITICAL")
+                high_count     = sum(1 for f in owasp_report.findings if f.severity.upper() == "HIGH")
+
+            if analysis_id in _results_store:
+                _results_store[analysis_id].update({
+                    "gate": gate,
+                    "has_vulnerabilities": has_vulns
+                })
+
             return AnalysisResult(
                 analysis_id=analysis_id,
                 repo=request.repo,
                 sha=request.sha,
                 gate=gate,
-                findings_summary=findings_summary if gate == "APPROVED" else "Analysis or Sandbox tests failed.",
-                critical_count=0,
-                high_count=0,
+                findings_summary=findings_summary if gate == "APPROVED" else findings_summary + " Gate: BLOCKED.",
+                critical_count=critical_count,
+                high_count=high_count,
                 ai_analysis_status=ai_status,
                 sandbox_validation_status=sandbox_status
             )
@@ -247,6 +280,11 @@ def analyze_endpoint(request: AnalysisRequest) -> AnalysisResult:
 
 @app.get("/result/{analysis_id}")
 def get_result(analysis_id: str) -> dict:
+    # ✅ SECURITY: analysis IDs are server-generated UUIDs — reject anything else.
+    try:
+        uuid.UUID(analysis_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Analysis ID not found")
     return _results_store.get(analysis_id, {"explanation": "No data found.", "patched_files": {}, "pr_url": "", "pr_number": None})
 
 @app.get("/stats")

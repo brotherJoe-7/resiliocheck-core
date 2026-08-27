@@ -43,3 +43,5 @@ htmlcov/
 .DS_Store
 Thumbs.db
 *.json
+tmp_workspace/
+tmp_workspace_*/
