@@ -1,10 +1,11 @@
 import os
 import uuid
 import shutil
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
+from sqlalchemy.orm import Session
 
 # Ensure we import from the new location of the core logic
 from backend.core import (
@@ -14,10 +15,19 @@ from backend.core import (
     run_ai_analysis, 
     apply_patch_and_validate
 )
+from backend.database import engine, get_db
+from backend import models, auth, admin
 
 load_dotenv()
 
+# Create all DB tables on startup
+models.Base.metadata.create_all(bind=engine)
+
 app = FastAPI(title="ResilioCheck AI Backend")
+
+# Register routers
+app.include_router(auth.router)
+app.include_router(admin.router)
 
 app.add_middleware(
     CORSMiddleware,
