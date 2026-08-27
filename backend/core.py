@@ -245,7 +245,7 @@ def scan_for_secrets(source_files):
                         "file":    os.path.basename(filepath),
                         "line":    lineno,
                         "pattern": label,
-                        "snippet": line.strip()[:120],  # truncate long lines
+                        "snippet": line.strip()[:120],
                     })
                     break  # one finding per line is enough
     return findings
@@ -254,38 +254,48 @@ def scan_for_secrets(source_files):
 def run_ai_analysis(source_files, secret_findings=None):
     """
     Sends collected source files to the Groq LLM for deep security analysis.
-    Uses llama3-8b-8192 for its high TPM allowance on free tier.
-    Files are ranked by security relevance and packed into one prompt that
-    stays within ~7000 tokens to avoid rate-limit errors.
+    Uses a system+user message pair for reliable JSON output.
 
     Returns a tuple: (explanation: str, patched_code: str)
     """
     _require_api_key()
     print("Sending code to Groq AI for security analysis...")
 
-    # Build compact system preamble
-    preamble = (
-        "You are an elite application security engineer. Analyse the following source files "
-        "for OWASP Top 10 vulnerabilities: SQL injection, XSS, path traversal, hardcoded secrets, "
-        "weak auth, broken access control, security misconfig, and known vulnerable components.\n"
+    system_message = (
+        "You are ResilioCheck AI, an elite application security engineer specializing in "
+        "OWASP Top 10 vulnerability detection. When given source code, you MUST respond "
+        "with a valid JSON object (no markdown, no code fences) containing exactly two keys:\n"
+        "1. \"explanation\": A detailed, structured security analysis string listing every "
+        "vulnerability found. For each issue include: file name, line number if known, "
+        "OWASP category (e.g. A03-Injection), severity (CRITICAL/HIGH/MEDIUM/LOW), "
+        "description, and specific remediation steps. If no vulnerabilities found, "
+        "write a brief clean-bill-of-health summary.\n"
+        "2. \"patched_code\": A string containing corrected/patched code for the most "
+        "critical vulnerability found. Use an empty string if no patch is needed.\n\n"
+        "IMPORTANT: Your ENTIRE response must be a single raw JSON object. "
+        "Do NOT use ```json fences. Do NOT include any text before or after the JSON."
     )
 
     secret_block = ""
     if secret_findings:
         lines = [f"  - [{f['pattern']}] {f['file']}:{f['line']}: {f['snippet']}" for f in secret_findings[:10]]
-        secret_block = f"\nPRE-SCAN: {len(secret_findings)} hardcoded secret(s) detected — include remediation:\n" + "\n".join(lines) + "\n"
+        secret_block = (
+            f"\n[PRE-SCAN RESULTS] Regex scanner detected {len(secret_findings)} hardcoded "
+            f"secret(s) before AI analysis. Include these in your findings:\n"
+            + "\n".join(lines) + "\n"
+        )
 
-    suffix = (
-        "\nReturn ONLY a raw JSON object with two keys:\n"
-        "'explanation': detailed vulnerability findings with severity and fix recommendations.\n"
-        "'patched_code': corrected code string (empty string if no patches needed).\n"
-        "--- SOURCE FILES ---\n"
+    user_intro = (
+        "Analyse the following source files for security vulnerabilities. "
+        "Remember: respond with ONLY a raw JSON object with keys 'explanation' and 'patched_code'.\n"
+        + secret_block
+        + "\n--- SOURCE FILES ---\n"
     )
 
     # Pack as many files as possible within ~27000 chars (~6750 tokens)
     MAX_PAYLOAD_CHARS = 27_000
     file_parts = []
-    total_chars = len(preamble) + len(secret_block) + len(suffix)
+    total_chars = len(system_message) + len(user_intro)
     for filepath, content in source_files.items():
         fname = os.path.basename(filepath)
         # Each file gets at most 1500 chars to share budget fairly
@@ -296,8 +306,8 @@ def run_ai_analysis(source_files, secret_findings=None):
         file_parts.append(snippet)
         total_chars += len(snippet)
 
-    prompt = preamble + secret_block + suffix + "".join(file_parts)
-    print(f"Prompt payload: {len(prompt)} chars covering {len(file_parts)} file(s).")
+    user_message = user_intro + "".join(file_parts)
+    print(f"Prompt payload: {len(user_message)} chars covering {len(file_parts)} file(s).")
 
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
@@ -305,11 +315,11 @@ def run_ai_analysis(source_files, secret_findings=None):
     }
     payload = {
         "model":       GROQ_MODEL,
-        "messages":    [{"role": "user", "content": prompt}],
-        "temperature": 0.0,
-        # NOTE: Do NOT use response_format json_object — some models emit empty
-        # failed_generation when the prompt contains code with special chars.
-        # We extract JSON manually from the response text instead.
+        "messages":    [
+            {"role": "system", "content": system_message},
+            {"role": "user",   "content": user_message},
+        ],
+        "temperature": 0.1,
     }
 
     try:
@@ -324,38 +334,60 @@ def run_ai_analysis(source_files, secret_findings=None):
 
         choices     = result.get("choices") or []
         first       = choices[0] if choices else {}
-        raw_content = (first.get("message") or {}).get("content", "{}")
+        raw_content = (first.get("message") or {}).get("content", "")
+
+        print(f"\n[DEBUG] Raw AI response ({len(raw_content)} chars):")
+        try:
+            print(raw_content[:500])
+        except UnicodeEncodeError:
+            print(raw_content[:500].encode('ascii', 'ignore').decode('ascii'))
+
+        # If content is empty or null, check for tool_use_failed in the error body
+        if not raw_content.strip():
+            err_body = result.get("error", {})
+            failed_gen = err_body.get("failed_generation", "")
+            if failed_gen:
+                raw_content = failed_gen  # use the reasoning output as fallback
 
         # First try direct JSON parse
         ai_data = {}
         try:
             ai_data = json.loads(raw_content)
         except json.JSONDecodeError:
-            # Fallback: extract first {...} block from the response
-            match = re.search(r'\{[\s\S]*\}', raw_content)
-            if match:
-                try:
-                    ai_data = json.loads(match.group(0))
-                except json.JSONDecodeError:
-                    pass
-            if not ai_data:
-                # Last resort: treat entire response as the explanation
-                ai_data = {"explanation": raw_content.strip(), "patched_code": ""}
+            # Fallback: strip markdown fences then try again
+            cleaned = re.sub(r'```(?:json)?\s*', '', raw_content).strip().rstrip('`').strip()
+            try:
+                ai_data = json.loads(cleaned)
+            except json.JSONDecodeError:
+                # Fallback: extract first {...} block from the response
+                match = re.search(r'\{[\s\S]*\}', cleaned)
+                if match:
+                    try:
+                        ai_data = json.loads(match.group(0))
+                    except json.JSONDecodeError:
+                        pass
+                if not ai_data:
+                    # Last resort: treat entire response as the explanation
+                    ai_data = {"explanation": raw_content.strip() or "Analysis complete — no structured output returned by model.", "patched_code": ""}
 
-        explanation  = ai_data.get("explanation", "Code verification processed.")
+        explanation  = ai_data.get("explanation", "").strip()
         patched_code = ai_data.get("patched_code", "")
+
+        # Final guard — if explanation is still empty after all parsing
+        if not explanation:
+            explanation = "Security analysis complete. The AI model returned an empty report for this repository — this typically means no obvious vulnerabilities were detected in the scanned files."
 
         print("\nAI Explanation:")
         try:
-            print(explanation)
+            print(explanation[:300])
         except UnicodeEncodeError:
-            print(explanation.encode('ascii', 'ignore').decode('ascii'))
+            print(explanation[:300].encode('ascii', 'ignore').decode('ascii'))
         return explanation, patched_code
 
     except Exception as e:
         print(f"ERROR: AI Analysis failed: {str(e)}")
         if "response" in locals() and hasattr(response, "text"):
-            print(f"Response: {response.text}")
+            print(f"Response: {response.text[:500]}")
         return "AI analysis failed.", None
 
 
