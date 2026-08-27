@@ -55,11 +55,13 @@ export default function DashboardPage() {
 
       const verdict = data.sandbox_verdict;
       const hasIssues = data.secret_findings?.length > 0 || Object.keys(data.patched_files || {}).length > 0;
+      const aiFailed = data.explanation === "AI analysis failed.";
+      
       setScanResult(data);
       setScanCount(c => c + 1);
       setGates({
         webhook_ingestion: 'APPROVED',
-        ai_analysis: hasIssues ? 'BLOCKED' : 'APPROVED',
+        ai_analysis: aiFailed ? 'FAILED' : (hasIssues ? 'BLOCKED' : 'APPROVED'),
         sandbox_validation: verdict === 'PASS' || verdict === 'SKIPPED' ? 'APPROVED' : 'FAILED',
         rasp_monitoring: 'APPROVED',
       });

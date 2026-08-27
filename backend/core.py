@@ -153,15 +153,15 @@ def download_and_extract_repo(repo_url, target_dir):
     os.remove(zip_path)
 
 
-def gather_source_files(workspace_dir, max_files=10, max_bytes=30_000):
+def gather_source_files(workspace_dir, max_files=4, max_bytes=15_000):
     """
     Recursively walks workspace_dir and collects source files across all
     meaningful languages and config file types. Returns a dict of
     {filepath: content_string}.
 
     Limits:
-    - max_files  : maximum number of files passed to the AI (default 10)
-    - max_bytes  : maximum individual file size in bytes (default 30 KB)
+    - max_files  : maximum number of files passed to the AI (default 4)
+    - max_bytes  : maximum individual file size in bytes (default 15 KB)
     """
     collected = {}
     print("Scanning repository — collecting source files across all languages...")
@@ -296,8 +296,8 @@ def run_ai_analysis(source_files, secret_findings=None):
 
     for filepath, content in source_files.items():
         fname = os.path.basename(filepath)
-        # Truncate very large files to stay within token budget
-        trimmed = content[:8000] if len(content) > 8000 else content
+        # Truncate very large files to stay within token budget (approx 2500 chars / 600 tokens)
+        trimmed = content[:2500] if len(content) > 2500 else content
         prompt_parts.append(f"\n=== {fname} ===\n{trimmed}\n")
 
     prompt = "".join(prompt_parts)
