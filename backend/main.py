@@ -535,3 +535,58 @@ def update_settings(s: SettingsUpdate):
     _settings["workspace"] = s.workspace
     _settings["timezone"]  = s.timezone
     return {"status": "success"}
+
+
+# ── Admin ────────────────────────────────────────────────────────────────────
+
+from backend.auth import require_admin
+
+@app.get("/api/admin/users")
+def get_admin_users(db: Session = Depends(get_db), current_user: models.User = Depends(require_admin)):
+    users = db.query(models.User).all()
+    return [
+        {
+            "id": u.id,
+            "email": u.email,
+            "full_name": u.full_name,
+            "role": u.role,
+            "is_active": u.is_active,
+            "scan_count": u.scan_count,
+            "last_login": str(u.last_login) if u.last_login else "None",
+            "created_at": str(u.created_at),
+        }
+        for u in users
+    ]
+
+@app.get("/api/admin/stats")
+def get_admin_stats(db: Session = Depends(get_db), current_user: models.User = Depends(require_admin)):
+    total_users = db.query(models.User).count()
+    admin_count = db.query(models.User).filter(models.User.role.in_(["admin", "superadmin"])).count()
+    total_scans = db.query(models.ScanResult).count()
+    return {
+        "total_users": total_users,
+        "admin_count": admin_count,
+        "total_scans": total_scans,
+    }
+
+@app.post("/api/admin/users/{user_id}/role")
+def update_user_role(user_id: int, role: str, db: Session = Depends(get_db), current_user: models.User = Depends(require_admin)):
+    target_user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target_user.role == "superadmin" and current_user.role != "superadmin":
+        raise HTTPException(status_code=403, detail="Only a superadmin can modify another superadmin")
+    target_user.role = role
+    db.commit()
+    return {"status": "success", "role": target_user.role}
+
+@app.delete("/api/admin/users/{user_id}")
+def deactivate_user(user_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(require_admin)):
+    target_user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target_user.role == "superadmin" and current_user.role != "superadmin":
+        raise HTTPException(status_code=403, detail="Only a superadmin can deactivate another superadmin")
+    target_user.is_active = False
+    db.commit()
+    return {"status": "success", "is_active": target_user.is_active}

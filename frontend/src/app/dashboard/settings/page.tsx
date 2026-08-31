@@ -113,7 +113,7 @@ export default function SettingsPage() {
                   </div>
                 </div>
                 
-                <button className="rc-btn-secondary" style={{ width: '100%' }}>Manage Billing</button>
+                <button className="rc-btn-secondary" style={{ width: '100%' }} onClick={() => alert('Billing portal is coming soon.')}>Manage Billing</button>
               </div>
 
               <div className="rc-card">
@@ -128,7 +128,7 @@ export default function SettingsPage() {
                       <div style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: 4, background: 'var(--bg-base)', color: 'var(--text-secondary)' }}>{m.role}</div>
                     </div>
                   ))}
-                  <button className="rc-btn-secondary" style={{ marginTop: 8 }}>+ Invite Member</button>
+                  <button className="rc-btn-secondary" style={{ marginTop: 8 }} onClick={() => alert('Invite member feature is coming soon.')}>+ Invite Member</button>
                 </div>
               </div>
             </div>
