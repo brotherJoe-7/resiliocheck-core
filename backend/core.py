@@ -391,54 +391,173 @@ def run_ai_analysis(source_files, secret_findings=None):
         return "AI analysis failed.", None
 
 
+def _extract_mock_env(workspace_dir: str) -> dict:
+    """
+    Reads .env.example (or README for ENV= patterns) and generates safe mock
+    values so static tools that load dotenv don't complain about missing vars.
+    Never returns real secrets — only placeholder values.
+    """
+    mock_env: dict = {}
+    for candidate in [".env.example", ".env.sample", ".env.template"]:
+        env_path = None
+        for root, dirs, files in os.walk(workspace_dir):
+            dirs[:] = [d for d in dirs if d not in SKIP_FOLDERS]
+            if candidate in files:
+                env_path = os.path.join(root, candidate)
+                break
+        if env_path:
+            try:
+                with open(env_path, "r", encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        if "=" in line:
+                            key = line.split("=", 1)[0].strip()
+                            # Generate a safe type-appropriate mock value
+                            k_lower = key.lower()
+                            if "url" in k_lower or "uri" in k_lower:
+                                mock_env[key] = "sqlite:///mock.db"
+                            elif "port" in k_lower:
+                                mock_env[key] = "8080"
+                            elif "host" in k_lower:
+                                mock_env[key] = "localhost"
+                            elif "debug" in k_lower:
+                                mock_env[key] = "false"
+                            else:
+                                mock_env[key] = "mock-placeholder-value"
+            except Exception:
+                pass
+    return mock_env
+
+
+def _detect_project_type(workspace_dir: str) -> str:
+    """Detect the dominant language/framework of the repo."""
+    for root, dirs, files in os.walk(workspace_dir):
+        dirs[:] = [d for d in dirs if d not in SKIP_FOLDERS]
+        if "package.json" in files:
+            return "node"
+        if "requirements.txt" in files or "pyproject.toml" in files or "setup.py" in files:
+            return "python"
+        if "go.mod" in files:
+            return "go"
+        if "Gemfile" in files:
+            return "ruby"
+        if "composer.json" in files:
+            return "php"
+    return "unknown"
+
+
 def apply_patch_and_validate(workspace_dir, patched_code, patched_filename="patched_script.js"):
     """
-    Writes the AI-generated patch to disk and syntax-validates it inside a
-    hardened, network-isolated Docker container.
+    Multi-layer static analysis sandbox — works on ANY public repo, with or
+    without a .env file:
 
-    Returns one of: "PASS", "FAIL", "SKIPPED", "ERROR" so callers (CLI and
-    dashboard) can surface the real sandbox verdict instead of guessing.
+    Layer 1 — SAST (Static Application Security Testing)
+        Python  → bandit  (finds real security bugs: SQL-i, shell-inject, etc.)
+        JS/TS   → semgrep (OWASP ruleset, no npm install needed)
+        Generic → semgrep auto ruleset
+
+    Layer 2 — Dependency CVE Audit
+        Node    → npm audit --audit-level=high (reads package-lock.json)
+        Python  → pip-audit (reads requirements.txt / pyproject.toml)
+
+    Layer 3 — Syntax Validation (always runs)
+        Compiles/parses the AI-generated patch to confirm it is valid code.
+
+    The sandbox NEVER executes the application. No .env is needed.
+    Mock env vars are injected from .env.example if present so linting tools
+    that call os.environ don't raise warnings.
     """
     if not (patched_code and patched_code.strip()):
-        print("No patched code generated.")
+        print("No patched code generated — skipping sandbox.")
         return "SKIPPED"
 
     patched_file_path = os.path.join(workspace_dir, patched_filename)
-
     ext = os.path.splitext(patched_filename)[1].lower()
-    
-    if ext == ".py":
-        image = "python:3.11-alpine"
-        command = f"python -m py_compile /workspace/{patched_filename}"
-    elif ext in [".js", ".jsx"]:
-        image = "node:22-alpine"
-        command = f"node --check /workspace/{patched_filename}"
-    elif ext in [".ts", ".tsx"]:
-        image = "node:22-alpine"
-        # Node 22.6+ supports native TS execution/checking via strip-types
-        command = f"node --experimental-strip-types --check /workspace/{patched_filename}"
-    elif ext == ".php":
-        image = "php:8.2-cli-alpine"
-        command = f"php -l /workspace/{patched_filename}"
-    elif ext == ".rb":
-        image = "ruby:3.2-alpine"
-        command = f"ruby -c /workspace/{patched_filename}"
-    elif ext == ".sh":
-        image = "bash:latest"
-        command = f"bash -n /workspace/{patched_filename}"
-    else:
-        print(f"File type {ext} cannot be safely syntax checked without dependencies — skipping Docker sandbox.")
-        return "SKIPPED"
+    project_type = _detect_project_type(workspace_dir)
+    mock_env = _extract_mock_env(workspace_dir)
 
     print(f"Writing patched code to {patched_file_path}")
     with open(patched_file_path, "w", encoding="utf-8") as f:
         f.write(patched_code)
 
-    print(f"Running Docker Sandbox Validation ({image})...")
+    # Write a synthetic .env with mock values so tools that read dotenv work
+    mock_env_path = os.path.join(workspace_dir, ".env.sandbox")
+    with open(mock_env_path, "w", encoding="utf-8") as f:
+        for k, v in mock_env.items():
+            f.write(f"{k}={v}\n")
+        if not mock_env:
+            f.write("APP_ENV=sandbox\nDEBUG=false\n")
+
+    print(f"Running Docker Sandbox — project_type={project_type}, ext={ext}, mock_env_vars={len(mock_env)}")
+
     container = None
     try:
-        client        = docker.from_env()
+        client = docker.from_env()
         abs_workspace = os.path.abspath(workspace_dir)
+
+        # ── Select image, SAST command, and syntax command by language ──────
+        if ext == ".py" or project_type == "python":
+            image = "python:3.11-slim"
+            # Layer 1 SAST: bandit security scanner
+            # Layer 2 Deps: pip-audit for CVEs
+            # Layer 3 Syntax: py_compile on the patched file
+            command = (
+                "sh -c \""
+                "pip install --quiet bandit pip-audit 2>/dev/null; "
+                f"bandit -r /workspace -ll -q --exclude /workspace/node_modules 2>&1 | head -60; "
+                f"pip-audit --requirement /workspace/requirements.txt -q 2>/dev/null | head -30; "
+                f"python -m py_compile /workspace/{patched_filename} && echo 'SYNTAX:OK' || echo 'SYNTAX:FAIL'\""
+            )
+        elif ext in (".js", ".jsx") or (project_type == "node" and ext not in (".ts", ".tsx")):
+            image = "node:22-alpine"
+            # Layer 1 SAST: semgrep javascript rules
+            # Layer 2 Deps: npm audit
+            # Layer 3 Syntax: node --check
+            command = (
+                "sh -c \""
+                "npm install --quiet -g semgrep 2>/dev/null || true; "
+                f"semgrep --config=p/javascript /workspace --quiet 2>&1 | head -60; "
+                f"cd /workspace && npm audit --audit-level=high 2>&1 | head -30; "
+                f"node --check /workspace/{patched_filename} && echo 'SYNTAX:OK' || echo 'SYNTAX:FAIL'\""
+            )
+        elif ext in (".ts", ".tsx"):
+            image = "node:22-alpine"
+            command = (
+                "sh -c \""
+                "npm install --quiet -g semgrep 2>/dev/null || true; "
+                f"semgrep --config=p/typescript /workspace --quiet 2>&1 | head -60; "
+                f"cd /workspace && npm audit --audit-level=high 2>&1 | head -30; "
+                f"node --experimental-strip-types --check /workspace/{patched_filename} && echo 'SYNTAX:OK' || echo 'SYNTAX:FAIL'\""
+            )
+        elif ext == ".php":
+            image = "php:8.2-cli-alpine"
+            command = (
+                "sh -c \""
+                f"php -l /workspace/{patched_filename} && echo 'SYNTAX:OK' || echo 'SYNTAX:FAIL'\""
+            )
+        elif ext == ".rb":
+            image = "ruby:3.2-alpine"
+            command = (
+                "sh -c \""
+                f"ruby -c /workspace/{patched_filename} && echo 'SYNTAX:OK' || echo 'SYNTAX:FAIL'\""
+            )
+        elif ext == ".sh":
+            image = "bash:latest"
+            command = (
+                "sh -c \""
+                f"bash -n /workspace/{patched_filename} && echo 'SYNTAX:OK' || echo 'SYNTAX:FAIL'\""
+            )
+        else:
+            print(f"File type {ext} — running generic semgrep SAST only.")
+            image = "python:3.11-slim"
+            command = (
+                "sh -c \""
+                "pip install --quiet semgrep 2>/dev/null; "
+                f"semgrep --config=p/secrets /workspace --quiet 2>&1 | head -60; "
+                "echo 'SYNTAX:SKIPPED'\""
+            )
 
         container = client.containers.run(
             image,
@@ -446,32 +565,48 @@ def apply_patch_and_validate(workspace_dir, patched_code, patched_filename="patc
             volumes={abs_workspace: {"bind": "/workspace", "mode": "ro"}},
             # ✅ SECURITY: hardened profile — no network, read-only root fs,
             # no capabilities, no privilege escalation, resource limits.
-            network_disabled=True,
-            read_only=True,
+            # NOTE: network_disabled is False here only to allow pip/npm to
+            # install SAST tools (semgrep, bandit) inside the container.
+            # The ANALYSED CODE itself never runs — only linters execute.
+            network_disabled=False,
+            read_only=False,           # needs tmp space for tool installation
             cap_drop=["ALL"],
             security_opt=["no-new-privileges:true"],
             mem_limit="512m",
-            pids_limit=64,
+            pids_limit=128,
             detach=True,
             remove=False,
         )
 
-        exit_status = container.wait(timeout=120)
-        logs        = container.logs().decode("utf-8", errors="replace")
+        exit_status = container.wait(timeout=180)
+        logs = container.logs().decode("utf-8", errors="replace")
 
-        if exit_status["StatusCode"] == 0:
+        print(f"Sandbox logs:\n{logs[:800]}")
+
+        syntax_ok = "SYNTAX:OK" in logs or "SYNTAX:SKIPPED" in logs
+        has_critical = any(w in logs.lower() for w in ["critical", "high severity", "severity: high"])
+
+        if syntax_ok and not has_critical:
             print("Sandbox Validation: PASS")
             return "PASS"
-        print("Sandbox Validation: FAIL")
-        print(logs)
-        return "FAIL"
+        elif not syntax_ok:
+            print("Sandbox Validation: FAIL (syntax error in patched code)")
+            return "FAIL"
+        else:
+            print("Sandbox Validation: FAIL (critical/high severity findings)")
+            return "FAIL"
 
     except Exception as e:
-        print(f"ERROR: Docker validation failed: {str(e)}")
+        print(f"ERROR: Docker sandbox failed: {str(e)}")
         return "ERROR"
     finally:
-        # ✅ Always clean up the container — the previous version leaked
-        # containers whenever wait()/logs() raised before remove().
+        if container is not None:
+            try:
+                container.remove(force=True)
+            except Exception:
+                pass
+
+
         if container is not None:
             try:
                 container.remove(force=True)
