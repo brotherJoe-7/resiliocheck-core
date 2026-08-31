@@ -31,6 +31,8 @@ class ScanResult(Base):
     findings        = Column(JSON, default=list)           # list of finding dicts
     explanation     = Column(Text, default="")
     patched_code    = Column(Text, default="")
+    patched_filename= Column(String, default="")
+    patch_status    = Column(String, default="PENDING")    # PENDING | APPROVED | REJECTED | APPLIED
     secret_findings = Column(JSON, default=list)
     sandbox_verdict = Column(String, default="SKIPPED")
     scanned_at      = Column(DateTime(timezone=True), server_default=func.now())

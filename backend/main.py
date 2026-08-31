@@ -186,6 +186,8 @@ def _scan_to_dict(s: models.ScanResult) -> dict:
         "findings":        s.findings or [],
         "explanation":     s.explanation,
         "patched_code":    s.patched_code,
+        "patched_filename": getattr(s, "patched_filename", "") or "",
+        "patch_status":    getattr(s, "patch_status", "PENDING") or "PENDING",
         "secret_findings": s.secret_findings or [],
         "sandbox_verdict": s.sandbox_verdict,
         "scanned_at":      s.scanned_at.isoformat() if s.scanned_at else None,
@@ -254,8 +256,10 @@ def run_scan(req: ScanRequest, db: Session = Depends(get_db)):
             findings        = pipeline_result["findings"],
             explanation     = pipeline_result["explanation"],
             patched_code    = patched_code,
+            patched_filename= patched_filename,
             secret_findings = secret_findings,
             sandbox_verdict = sandbox_verdict,
+            patch_status    = "PENDING" if patched_code else "N/A",
         )
         db.add(result)
 
@@ -293,6 +297,140 @@ def get_scan_history(db: Session = Depends(get_db)):
     """Return all past scan results, newest first."""
     scans = db.query(models.ScanResult).order_by(models.ScanResult.id.desc()).limit(50).all()
     return [_scan_to_dict(s) for s in scans]
+
+
+# ── Patch Approval (GitHub PR) ───────────────────────────────────────────────
+
+@app.post("/api/scans/{scan_id}/apply-patch")
+def apply_patch_pr(scan_id: int, db: Session = Depends(get_db)):
+    """
+    Creates a GitHub Pull Request applying the AI-generated patch.
+    Uses GITHUB_TOKEN from .env to authenticate.
+    """
+    import tempfile
+    import subprocess
+    import requests as http_requests
+
+    scan = db.query(models.ScanResult).filter(models.ScanResult.id == scan_id).first()
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    if not scan.patched_code:
+        raise HTTPException(status_code=400, detail="No patch available for this scan")
+    if getattr(scan, "patch_status", "PENDING") == "APPLIED":
+        raise HTTPException(status_code=400, detail="Patch already applied")
+
+    github_token = os.getenv("GITHUB_TOKEN")
+    if not github_token:
+        raise HTTPException(status_code=500, detail="GITHUB_TOKEN is not configured")
+
+    # Parse owner/repo from repo_url
+    repo_url = scan.repo_url.rstrip("/")
+    parts    = repo_url.replace("https://github.com/", "").split("/")
+    if len(parts) < 2:
+        raise HTTPException(status_code=400, detail="Cannot parse owner/repo from scan URL")
+    owner, repo = parts[0], parts[1]
+
+    branch_name  = f"resiliocheck-fix-{scan_id}"
+    patched_file = getattr(scan, "patched_filename", None) or "patched_fix.txt"
+
+    try:
+        # ── 1. Get default branch SHA ──────────────────────────────────────────
+        headers = {
+            "Authorization": f"token {github_token}",
+            "Accept":        "application/vnd.github+json",
+        }
+        ref_resp = http_requests.get(
+            f"https://api.github.com/repos/{owner}/{repo}/git/ref/heads/{scan.branch}",
+            headers=headers, timeout=15,
+        )
+        if ref_resp.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"GitHub ref lookup failed: {ref_resp.text}")
+        base_sha = ref_resp.json()["object"]["sha"]
+
+        # ── 2. Create fix branch ───────────────────────────────────────────────
+        create_branch = http_requests.post(
+            f"https://api.github.com/repos/{owner}/{repo}/git/refs",
+            headers=headers,
+            json={"ref": f"refs/heads/{branch_name}", "sha": base_sha},
+            timeout=15,
+        )
+        if create_branch.status_code not in (201, 422):   # 422 = already exists
+            raise HTTPException(status_code=502, detail=f"Branch creation failed: {create_branch.text}")
+
+        # ── 3. Get current file SHA (needed for update) ────────────────────────
+        file_resp = http_requests.get(
+            f"https://api.github.com/repos/{owner}/{repo}/contents/{patched_file}",
+            headers=headers,
+            params={"ref": branch_name},
+            timeout=15,
+        )
+        file_sha = file_resp.json().get("sha") if file_resp.status_code == 200 else None
+
+        # ── 4. Push patched file ───────────────────────────────────────────────
+        import base64
+        content_b64 = base64.b64encode(scan.patched_code.encode()).decode()
+        update_payload = {
+            "message": f"fix(resiliocheck): AI-generated security patch for scan #{scan_id}",
+            "content": content_b64,
+            "branch":  branch_name,
+        }
+        if file_sha:
+            update_payload["sha"] = file_sha
+
+        push_resp = http_requests.put(
+            f"https://api.github.com/repos/{owner}/{repo}/contents/{patched_file}",
+            headers=headers,
+            json=update_payload,
+            timeout=15,
+        )
+        if push_resp.status_code not in (200, 201):
+            raise HTTPException(status_code=502, detail=f"File push failed: {push_resp.text}")
+
+        # ── 5. Open Pull Request ───────────────────────────────────────────────
+        pr_resp = http_requests.post(
+            f"https://api.github.com/repos/{owner}/{repo}/pulls",
+            headers=headers,
+            json={
+                "title": f"[ResilioCheck AI] Security Fix — Scan #{scan_id}",
+                "body":  (
+                    f"**Automated security patch generated by ResilioCheck AI.**\n\n"
+                    f"**Scanned Repository:** {scan.repo_url}\n"
+                    f"**Branch:** `{scan.branch}`\n"
+                    f"**Gate Verdict:** `{scan.gate}`\n"
+                    f"**Findings:** {scan.critical_count} critical, {scan.high_count} high\n\n"
+                    f"### Rationale\n{scan.gate_rationale}\n\n"
+                    f"### AI Explanation\n{scan.explanation}\n"
+                ),
+                "head": branch_name,
+                "base": scan.branch,
+            },
+            timeout=15,
+        )
+        if pr_resp.status_code not in (200, 201):
+            raise HTTPException(status_code=502, detail=f"PR creation failed: {pr_resp.text}")
+
+        pr_url = pr_resp.json().get("html_url", "")
+
+        # ── 6. Mark scan as APPLIED ────────────────────────────────────────────
+        scan.patch_status = "APPLIED"
+        db.commit()
+
+        return {"status": "success", "pr_url": pr_url, "branch": branch_name}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"GitHub PR failed: {str(e)}")
+
+
+@app.post("/api/scans/{scan_id}/reject-patch")
+def reject_patch(scan_id: int, db: Session = Depends(get_db)):
+    scan = db.query(models.ScanResult).filter(models.ScanResult.id == scan_id).first()
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    scan.patch_status = "REJECTED"
+    db.commit()
+    return {"status": "success", "patch_status": "REJECTED"}
 
 
 # ── Gates ────────────────────────────────────────────────────────────────────

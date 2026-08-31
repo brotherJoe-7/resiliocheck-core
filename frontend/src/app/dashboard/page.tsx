@@ -47,11 +47,13 @@ export default function DashboardPage() {
   const [branch, setBranch]       = useState('main');
   const [engine, setEngine]       = useState('Llama 3.3 Deep Static Analysis (SAST)');
   const [gates, setGates]         = useState(INITIAL_GATES);
-  const [loading, setLoading]     = useState(false);
-  const [scanResult, setScanResult] = useState<any>(null);
-  const [history, setHistory]     = useState<any[]>([]);
-  const [error, setError]         = useState('');
-  const [startTime]               = useState(Date.now());
+  const [loading, setLoading]         = useState(false);
+  const [patchLoading, setPatchLoading] = useState(false);
+  const [patchToast, setPatchToast]   = useState<{type: 'success'|'error', msg: string, url?: string} | null>(null);
+  const [scanResult, setScanResult]   = useState<any>(null);
+  const [history, setHistory]         = useState<any[]>([]);
+  const [error, setError]             = useState('');
+  const [startTime]                   = useState(Date.now());
 
   // Fetch persistent scan history from DB on mount
   const loadHistory = useCallback(async () => {
@@ -63,6 +65,39 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  async function handleApprove(scanId: number) {
+    setPatchLoading(true);
+    setPatchToast(null);
+    try {
+      const res  = await fetch(`http://localhost:8000/api/scans/${scanId}/apply-patch`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Failed to create PR');
+      setPatchToast({ type: 'success', msg: `✅ Pull Request created!`, url: data.pr_url });
+      // Refresh scanResult patch_status
+      setScanResult((prev: any) => prev ? { ...prev, patch_status: 'APPLIED' } : prev);
+      await loadHistory();
+    } catch (e: any) {
+      setPatchToast({ type: 'error', msg: `❌ ${e.message}` });
+    } finally {
+      setPatchLoading(false);
+    }
+  }
+
+  async function handleReject(scanId: number) {
+    setPatchLoading(true);
+    setPatchToast(null);
+    try {
+      await fetch(`http://localhost:8000/api/scans/${scanId}/reject-patch`, { method: 'POST' });
+      setPatchToast({ type: 'error', msg: '🚫 Patch rejected.' });
+      setScanResult((prev: any) => prev ? { ...prev, patch_status: 'REJECTED' } : prev);
+      await loadHistory();
+    } catch (e: any) {
+      setPatchToast({ type: 'error', msg: `❌ ${e.message}` });
+    } finally {
+      setPatchLoading(false);
+    }
+  }
 
   const criticalVulns = scanResult?.critical_count ?? 0;
   const elapsedH      = Math.floor((Date.now() - startTime) / 3600000);
@@ -255,15 +290,64 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {/* Patched Code */}
+            {/* Patched Code + Approve/Reject */}
             {scanResult.patched_code && (
               <div>
-                <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px', color: 'var(--green)', marginBottom: 8 }}>
-                  ✓ AI-Generated Patch — Sandbox Verdict: {scanResult.sandbox_verdict}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px', color: 'var(--green)' }}>
+                    ✓ AI-Generated Patch — Sandbox Verdict: {scanResult.sandbox_verdict} — File: {scanResult.patched_filename || 'unknown'}
+                  </div>
+                  {/* Status badge */}
+                  {scanResult.patch_status === 'APPLIED' && (
+                    <span style={{ fontSize: '0.7rem', fontWeight: 700, padding: '3px 10px', borderRadius: 20, background: 'rgba(20,209,120,0.12)', color: 'var(--green)', border: '1px solid rgba(20,209,120,0.3)' }}>✓ PR CREATED</span>
+                  )}
+                  {scanResult.patch_status === 'REJECTED' && (
+                    <span style={{ fontSize: '0.7rem', fontWeight: 700, padding: '3px 10px', borderRadius: 20, background: 'rgba(239,68,68,0.12)', color: 'var(--red)', border: '1px solid rgba(239,68,68,0.3)' }}>🚫 REJECTED</span>
+                  )}
                 </div>
-                <pre style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 6, padding: '14px 16px', overflow: 'auto', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                <pre style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 6, padding: '14px 16px', overflow: 'auto', fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: 12 }}>
                   {scanResult.patched_code}
                 </pre>
+
+                {/* Approve / Reject action bar */}
+                {scanResult.patch_status === 'PENDING' && (
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                    <button
+                      className="rc-btn-primary"
+                      onClick={() => handleApprove(scanResult.id)}
+                      disabled={patchLoading}
+                      style={{ fontSize: '0.78rem', padding: '8px 20px' }}
+                    >
+                      {patchLoading ? '⏳ Creating PR...' : '✅ Approve & Create PR'}
+                    </button>
+                    <button
+                      className="rc-btn-secondary"
+                      onClick={() => handleReject(scanResult.id)}
+                      disabled={patchLoading}
+                      style={{ fontSize: '0.78rem', padding: '8px 20px', color: 'var(--red)', borderColor: 'rgba(239,68,68,0.4)' }}
+                    >
+                      🚫 Reject Fix
+                    </button>
+                    <span style={{ fontSize: '0.73rem', color: 'var(--text-muted)' }}>Approving will open a Pull Request on GitHub with this patch.</span>
+                  </div>
+                )}
+
+                {/* Toast notification */}
+                {patchToast && (
+                  <div style={{
+                    marginTop: 10, padding: '10px 14px', borderRadius: 6, fontSize: '0.82rem', fontWeight: 600,
+                    background: patchToast.type === 'success' ? 'rgba(20,209,120,0.1)' : 'rgba(239,68,68,0.08)',
+                    border: `1px solid ${patchToast.type === 'success' ? 'rgba(20,209,120,0.3)' : 'rgba(239,68,68,0.3)'}`,
+                    color: patchToast.type === 'success' ? 'var(--green)' : 'var(--red)',
+                  }}>
+                    {patchToast.msg}
+                    {patchToast.url && (
+                      <a href={patchToast.url} target="_blank" rel="noreferrer" style={{ marginLeft: 10, color: 'var(--accent)', textDecoration: 'underline' }}>
+                        View PR →
+                      </a>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -285,6 +369,7 @@ export default function DashboardPage() {
                 <th>High</th>
                 <th>AI Gate</th>
                 <th>Sandbox</th>
+                <th>Patch</th>
               </tr>
             </thead>
             <tbody>
@@ -303,6 +388,9 @@ export default function DashboardPage() {
                   <td><span style={{ color: s.high_count > 0 ? '#f97316' : 'var(--green)', fontWeight: 700 }}>{s.high_count}</span></td>
                   <td><GatePill status={s.gate} /></td>
                   <td style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{s.sandbox_verdict}</td>
+                  <td style={{ fontSize: '0.72rem', fontWeight: 700,
+                    color: s.patch_status === 'APPLIED' ? 'var(--green)' : s.patch_status === 'REJECTED' ? 'var(--red)' : s.patch_status === 'PENDING' ? 'var(--accent)' : 'var(--text-muted)'
+                  }}>{s.patch_status || 'N/A'}</td>
                 </tr>
               ))}
             </tbody>
