@@ -439,6 +439,28 @@ def reject_patch(scan_id: int, db: Session = Depends(get_db)):
 def get_gates(db: Session = Depends(get_db)):
     return [_gate_to_dict(g) for g in db.query(models.Gate).all()]
 
+class GateCreate(BaseModel):
+    name: str
+    desc: str
+    strictness: str
+    action: str
+
+@app.post("/api/gates")
+def create_gate(gate_in: GateCreate, db: Session = Depends(get_db)):
+    gate_id = gate_in.name.lower().replace(" ", "_").replace("-", "_") + f"_{db.query(models.Gate).count()}"
+    new_gate = models.Gate(
+        id=gate_id,
+        name=gate_in.name,
+        desc=gate_in.desc,
+        active=True,
+        strictness=gate_in.strictness,
+        action=gate_in.action
+    )
+    db.add(new_gate)
+    db.commit()
+    db.refresh(new_gate)
+    return {"status": "success", "gate": _gate_to_dict(new_gate)}
+
 
 @app.post("/api/gates/{gate_id}/toggle")
 def toggle_gate(gate_id: str, db: Session = Depends(get_db)):
@@ -511,11 +533,11 @@ _settings = {
     "workspace": "ResilioCheck AI DevSecOps",
     "timezone":  "UTC (Coordinated Universal Time)",
     "plan": {
-        "name":          "Enterprise Plan",
-        "price":         499,
+        "name":          "Pro Plan",
+        "price":         5,
         "period":        "mo",
         "status":        "Active",
-        "billing_cycle": "Billed annually.",
+        "billing_cycle": "Billed monthly.",
         "seats_used":    1,
         "seats_total":   20,
     },

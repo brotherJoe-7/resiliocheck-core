@@ -1,6 +1,8 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import Sidebar from '../components/Sidebar';
+import { Zap, Check, AlertTriangle, Hourglass, LayoutGrid, X, CheckCircle2 } from 'lucide-react';
+
 
 const INITIAL_GATES = {
   webhook_ingestion: 'PENDING',
@@ -73,7 +75,7 @@ export default function DashboardPage() {
       const res  = await fetch(`http://localhost:8000/api/scans/${scanId}/apply-patch`, { method: 'POST' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Failed to create PR');
-      setPatchToast({ type: 'success', msg: `✅ Pull Request created!`, url: data.pr_url });
+      setPatchToast({ type: 'success', msg: `<CheckCircle2 size={16} /> Pull Request created!`, url: data.pr_url });
       // Refresh scanResult patch_status
       setScanResult((prev: any) => prev ? { ...prev, patch_status: 'APPLIED' } : prev);
       await loadHistory();
@@ -89,7 +91,7 @@ export default function DashboardPage() {
     setPatchToast(null);
     try {
       await fetch(`http://localhost:8000/api/scans/${scanId}/reject-patch`, { method: 'POST' });
-      setPatchToast({ type: 'error', msg: '🚫 Patch rejected.' });
+      setPatchToast({ type: 'error', msg: '<X size={16} className="text-red-500" /> Patch rejected.' });
       setScanResult((prev: any) => prev ? { ...prev, patch_status: 'REJECTED' } : prev);
       await loadHistory();
     } catch (e: any) {
@@ -173,7 +175,7 @@ export default function DashboardPage() {
           {/* Scan Config */}
           <div className="rc-card">
             <div className="rc-card-hdr">
-              <div className="rc-card-title">⚡ Repository Target &amp; Configuration</div>
+              <div className="rc-card-title"><Zap size={16} /> Repository Target &amp; Configuration</div>
             </div>
             <div style={{ marginBottom: 14 }}>
               <label className="rc-label">Repository URL Target</label>
@@ -194,15 +196,15 @@ export default function DashboardPage() {
               </div>
             </div>
             <button className="rc-btn-primary" onClick={handleScan} disabled={loading} style={{ width: '100%', justifyContent: 'center' }}>
-              {loading ? '⏳ Running 3-Stage AI Pipeline...' : '⚡ INITIATE SCAN'}
+              {loading ? <><Hourglass size={16} /> Running 3-Stage AI Pipeline...</> : <><Zap size={16} /> INITIATE SCAN</>}
             </button>
-            {error && <div style={{ marginTop: 12, color: 'var(--red)', fontSize: '0.8rem', padding: '10px 14px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6 }}>⚠ {error}</div>}
+            {error && <div style={{ marginTop: 12, color: 'var(--red)', fontSize: '0.8rem', padding: '10px 14px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6 }}><AlertTriangle size={16} /> {error}</div>}
           </div>
 
           {/* Gate Status */}
           <div className="rc-card">
             <div className="rc-card-hdr">
-              <div className="rc-card-title">⊞ Pipeline Gate Status</div>
+              <div className="rc-card-title"><LayoutGrid size={24} /> Pipeline Gate Status</div>
               {scanResult && (
                 <span style={{ fontSize: '0.7rem', fontWeight: 700, color: scanResult.gate === 'APPROVED' ? 'var(--green)' : 'var(--red)' }}>
                   AI Verdict: {scanResult.gate}
@@ -278,7 +280,7 @@ export default function DashboardPage() {
             {scanResult.secret_findings?.length > 0 && (
               <div style={{ marginBottom: 16 }}>
                 <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px', color: 'var(--red)', marginBottom: 10 }}>
-                  ⚠ Pre-Scan Secrets Scanner — {scanResult.secret_findings.length} Hardcoded Secret(s) Detected
+                  <AlertTriangle size={16} /> Pre-Scan Secrets Scanner — {scanResult.secret_findings.length} Hardcoded Secret(s) Detected
                 </div>
                 {scanResult.secret_findings.map((f: any, i: number) => (
                   <div key={i} style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6, padding: '10px 14px', marginBottom: 6, fontFamily: 'monospace', fontSize: '0.78rem' }}>
@@ -295,14 +297,14 @@ export default function DashboardPage() {
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                   <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px', color: 'var(--green)' }}>
-                    ✓ AI-Generated Patch — Sandbox Verdict: {scanResult.sandbox_verdict} — File: {scanResult.patched_filename || 'unknown'}
+                    <Check size={16} /> AI-Generated Patch — Sandbox Verdict: {scanResult.sandbox_verdict} — File: {scanResult.patched_filename || 'unknown'}
                   </div>
                   {/* Status badge */}
                   {scanResult.patch_status === 'APPLIED' && (
-                    <span style={{ fontSize: '0.7rem', fontWeight: 700, padding: '3px 10px', borderRadius: 20, background: 'rgba(20,209,120,0.12)', color: 'var(--green)', border: '1px solid rgba(20,209,120,0.3)' }}>✓ PR CREATED</span>
+                    <span style={{ fontSize: '0.7rem', fontWeight: 700, padding: '3px 10px', borderRadius: 20, background: 'rgba(20,209,120,0.12)', color: 'var(--green)', border: '1px solid rgba(20,209,120,0.3)' }}><Check size={16} /> PR CREATED</span>
                   )}
                   {scanResult.patch_status === 'REJECTED' && (
-                    <span style={{ fontSize: '0.7rem', fontWeight: 700, padding: '3px 10px', borderRadius: 20, background: 'rgba(239,68,68,0.12)', color: 'var(--red)', border: '1px solid rgba(239,68,68,0.3)' }}>🚫 REJECTED</span>
+                    <span style={{ fontSize: '0.7rem', fontWeight: 700, padding: '3px 10px', borderRadius: 20, background: 'rgba(239,68,68,0.12)', color: 'var(--red)', border: '1px solid rgba(239,68,68,0.3)' }}><X size={16} className="text-red-500" /> REJECTED</span>
                   )}
                 </div>
                 <pre style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 6, padding: '14px 16px', overflow: 'auto', fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: 12 }}>
@@ -318,7 +320,7 @@ export default function DashboardPage() {
                       disabled={patchLoading}
                       style={{ fontSize: '0.78rem', padding: '8px 20px' }}
                     >
-                      {patchLoading ? '⏳ Creating PR...' : '✅ Approve & Create PR'}
+                      {patchLoading ? <><Hourglass size={16} /> Creating PR...</> : <><CheckCircle2 size={16} /> Approve &amp; Create PR</>}
                     </button>
                     <button
                       className="rc-btn-secondary"
@@ -326,7 +328,7 @@ export default function DashboardPage() {
                       disabled={patchLoading}
                       style={{ fontSize: '0.78rem', padding: '8px 20px', color: 'var(--red)', borderColor: 'rgba(239,68,68,0.4)' }}
                     >
-                      🚫 Reject Fix
+                      <X size={16} className="text-red-500" /> Reject Fix
                     </button>
                     <span style={{ fontSize: '0.73rem', color: 'var(--text-muted)' }}>Approving will open a Pull Request on GitHub with this patch.</span>
                   </div>
@@ -399,7 +401,7 @@ export default function DashboardPage() {
 
         {/* Predictive Threat Analysis */}
         <div className="rc-card" style={{ textAlign: 'center', padding: '48px 24px' }}>
-          <div style={{ fontSize: '2rem', marginBottom: 12 }}>⚡</div>
+          <div style={{ fontSize: '2rem', marginBottom: 12 }}><Zap size={16} /></div>
           <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 10 }}>Predictive Threat Analysis</div>
           <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', lineHeight: 1.7 }}>
             The ResilioCheck AI multi-agent engine processes repositories through OWASP classification,

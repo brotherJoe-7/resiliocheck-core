@@ -2,13 +2,14 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '../context/AuthContext';
+import { LayoutGrid, Settings, Rocket, Shield, Monitor, Crown, User, LogOut } from 'lucide-react';
 
 const NAV = [
-  { href: '/dashboard', label: 'Dashboard', icon: '⊞' },
-  { href: '/dashboard/gates', label: 'Security Gates', icon: '🛡' },
-  { href: '/dashboard/deployments', label: 'Deployments', icon: '🚀' },
-  { href: '/dashboard/agents', label: 'Agents', icon: '🖥' },
-  { href: '/dashboard/settings', label: 'Settings', icon: '⚙' },
+  { href: '/dashboard',             label: 'Dashboard',      Icon: LayoutGrid },
+  { href: '/dashboard/gates',       label: 'Security Gates', Icon: Shield },
+  { href: '/dashboard/deployments', label: 'Deployments',    Icon: Rocket },
+  { href: '/dashboard/agents',      label: 'Agents',         Icon: Monitor },
+  { href: '/dashboard/settings',    label: 'Settings',       Icon: Settings },
 ];
 
 export default function Sidebar() {
@@ -33,11 +34,11 @@ export default function Sidebar() {
       </div>
 
       <nav className="rc-nav">
-        {NAV.map(({ href, label, icon }) => {
+        {NAV.map(({ href, label, Icon }) => {
           const active = pathname === href || (href !== '/dashboard' && pathname.startsWith(href));
           return (
             <Link key={href} href={href} className={`rc-nav-item ${active ? 'active' : ''}`}>
-              <span style={{ fontSize: '0.85rem', width: 18, textAlign: 'center' }}>{icon}</span>
+              <Icon size={16} />
               {label}
             </Link>
           );
@@ -49,7 +50,7 @@ export default function Sidebar() {
             className={`rc-nav-item ${pathname.startsWith('/dashboard/admin') ? 'active' : ''}`}
             style={{ marginTop: 8, borderTop: '1px solid var(--border)', paddingTop: 12 }}
           >
-            <span style={{ fontSize: '0.85rem', width: 18, textAlign: 'center' }}>👑</span>
+            <Crown size={16} />
             Admin Control
           </Link>
         )}
@@ -71,14 +72,14 @@ export default function Sidebar() {
           AUTONOMOUS MODE: ACTIVE
         </div>
         <Link href="/dashboard/settings" className="rc-footer-link">
-          <span>👤</span> Profile
+          <User size={14} /> Profile
         </Link>
         <button
           onClick={handleLogout}
           className="rc-footer-link"
           style={{ background: 'none', border: 'none', cursor: 'pointer', width: '100%', textAlign: 'left', padding: 0 }}
         >
-          <span>↪</span> Logout
+          <LogOut size={14} /> Logout
         </button>
       </div>
     </aside>

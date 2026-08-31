@@ -3,6 +3,8 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../context/AuthContext';
+import { Hourglass, Zap, AlertTriangle } from 'lucide-react';
+
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -35,7 +37,7 @@ export default function LoginPage() {
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 40 }}>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-            <div style={{ width: 32, height: 32, background: 'linear-gradient(135deg, #ea580c, #dc2626)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1rem' }}>⚡</div>
+            <div style={{ width: 32, height: 32, background: 'linear-gradient(135deg, #ea580c, #dc2626)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1rem' }}><Zap size={16} /></div>
             <span style={{ fontSize: '1.3rem', fontWeight: 800, color: '#fafafa', letterSpacing: '-0.02em' }}>ResilioCheck AI</span>
           </div>
           <div style={{ fontSize: '0.85rem', color: '#71717a' }}>Sign in to your workspace</div>
@@ -74,7 +76,7 @@ export default function LoginPage() {
 
             {error && (
               <div style={{ marginBottom: 16, padding: '10px 14px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 8, fontSize: '0.82rem', color: '#f87171' }}>
-                ⚠ {error}
+                <AlertTriangle size={16} /> {error}
               </div>
             )}
 
@@ -84,7 +86,7 @@ export default function LoginPage() {
               className="rc-btn-primary"
               style={{ width: '100%', justifyContent: 'center', fontSize: '0.95rem', padding: '12px 20px' }}
             >
-              {loading ? '⏳ Signing in...' : '⚡ Sign In'}
+              {loading ? <><Hourglass size={16} /> Signing in...</> : <><Zap size={16} /> Sign In</>}
             </button>
           </form>
 

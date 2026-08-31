@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import { Check } from 'lucide-react';
+
 
 const sections = [
   { id: 'quickstart', label: 'Quick Start' },
@@ -95,7 +97,7 @@ export default function DocumentationPage() {
               { title: 'Hardened Docker Sandbox', desc: 'AI-generated patches are validated in a container with zero network access, a read-only filesystem, dropped capabilities, and a 512 MB memory limit.' },
             ].map(s => (
               <div key={s.title} style={{ marginBottom: 20, padding: '20px', background: '#111113', border: '1px solid #27272a', borderRadius: 10 }}>
-                <div style={{ fontWeight: 700, marginBottom: 8, color: '#ea580c' }}>✓ {s.title}</div>
+                <div style={{ fontWeight: 700, marginBottom: 8, color: '#ea580c' }}><Check size={16} /> {s.title}</div>
                 <div style={{ fontSize: '0.85rem', color: '#a1a1aa', lineHeight: 1.7 }}>{s.desc}</div>
               </div>
             ))}

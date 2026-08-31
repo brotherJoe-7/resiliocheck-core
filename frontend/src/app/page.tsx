@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import { Check } from 'lucide-react';
+
 
 const PLANS = [
   {
@@ -69,7 +71,7 @@ export default function LandingPage() {
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 28 }}>
                 {plan.features.map(f => (
                   <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '0.82rem', color: '#a1a1aa' }}>
-                    <span style={{ color: '#14b8a6', fontSize: '0.9rem', flexShrink: 0 }}>✓</span>
+                    <span style={{ color: '#14b8a6', fontSize: '0.9rem', flexShrink: 0 }}><Check size={16} /></span>
                     {f}
                   </div>
                 ))}

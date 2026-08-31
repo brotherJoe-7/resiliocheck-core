@@ -1,12 +1,14 @@
 import Link from 'next/link';
+import { Brain, Sparkles, LayoutGrid, Key, Settings, Ship } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 
-const features = [
-  { icon: '🧠', title: 'AI Static Analysis Engine', desc: 'Powered by Groq Llama 3.3, the engine reads your source code across all major languages — Python, TypeScript, Go, Java, PHP — and identifies OWASP Top 10 vulnerabilities including SQLi, XSS, path traversal, and broken access control.' },
-  { icon: '🔑', title: 'Regex-Based Secret Scanner', desc: 'A deterministic pre-scan layer runs before the AI, catching hardcoded credentials instantly using 16+ pattern matchers: AWS keys, GitHub tokens, Stripe secrets, JWTs, MongoDB URIs, Twilio, SendGrid, and more.' },
-  { icon: '🐳', title: 'Hardened Docker Sandbox', desc: 'AI-generated patches are validated in an isolated, network-disabled Docker container. Zero capabilities, read-only filesystem, memory capped at 512MB — ensuring the fix itself cannot be weaponized.' },
-  { icon: '⊞', title: 'CI/CD Security Gates', desc: 'Configurable blockers integrate directly into your pipeline. XSS Prevention and Dependency Audit gates can be set to Block Deploy, Alert Only, or Log Only, with strictness levels from Permissive to Strict.' },
-  { icon: '✦', title: 'Autonomous Agent Fleet', desc: 'Background agents run continuously: the Code Fixer auto-opens PRs for detected issues, the Secret Scanner monitors incoming commits in real-time, and the Patch Automator bumps vulnerable dependencies automatically.' },
-  { icon: '⚙', title: 'Super Admin Control Plane', desc: 'A dedicated admin dashboard provides full visibility into platform usage — who has logged in, how many scans have been run, and team-wide role management with one-click access revocation.' },
+const features: { Icon: LucideIcon; title: string; desc: string }[] = [
+  { Icon: Brain,       title: 'AI Static Analysis Engine',  desc: 'Powered by Groq Llama 3.3, the engine reads your source code across all major languages — Python, TypeScript, Go, Java, PHP — and identifies OWASP Top 10 vulnerabilities including SQLi, XSS, path traversal, and broken access control.' },
+  { Icon: Key,         title: 'Regex-Based Secret Scanner', desc: 'A deterministic pre-scan layer runs before the AI, catching hardcoded credentials instantly using 16+ pattern matchers: AWS keys, GitHub tokens, Stripe secrets, JWTs, MongoDB URIs, Twilio, SendGrid, and more.' },
+  { Icon: Ship,        title: 'Hardened Docker Sandbox',    desc: 'AI-generated patches are validated in an isolated, network-disabled Docker container. Zero capabilities, read-only filesystem, memory capped at 512MB — ensuring the fix itself cannot be weaponized.' },
+  { Icon: LayoutGrid,  title: 'CI/CD Security Gates',       desc: 'Configurable blockers integrate directly into your pipeline. XSS Prevention and Dependency Audit gates can be set to Block Deploy, Alert Only, or Log Only, with strictness levels from Permissive to Strict.' },
+  { Icon: Sparkles,    title: 'Autonomous Agent Fleet',     desc: 'Background agents run continuously: the Code Fixer auto-opens PRs for detected issues, the Secret Scanner monitors incoming commits in real-time, and the Patch Automator bumps vulnerable dependencies automatically.' },
+  { Icon: Settings,    title: 'Super Admin Control Plane',  desc: 'A dedicated admin dashboard provides full visibility into platform usage — who has logged in, how many scans have been run, and team-wide role management with one-click access revocation.' },
 ];
 
 export default function PlatformPage() {
@@ -29,11 +31,11 @@ export default function PlatformPage() {
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
-          {features.map(f => (
-            <div key={f.title} style={{ background: '#111113', border: '1px solid #27272a', borderRadius: 12, padding: '28px 24px' }}>
-              <div style={{ fontSize: '1.8rem', marginBottom: 12 }}>{f.icon}</div>
-              <div style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 10 }}>{f.title}</div>
-              <div style={{ fontSize: '0.85rem', color: '#a1a1aa', lineHeight: 1.7 }}>{f.desc}</div>
+          {features.map(({ Icon, title, desc }) => (
+            <div key={title} style={{ background: '#111113', border: '1px solid #27272a', borderRadius: 12, padding: '28px 24px' }}>
+              <div style={{ marginBottom: 12, color: '#ea580c' }}><Icon size={24} /></div>
+              <div style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 10 }}>{title}</div>
+              <div style={{ fontSize: '0.85rem', color: '#a1a1aa', lineHeight: 1.7 }}>{desc}</div>
             </div>
           ))}
         </div>

@@ -1,22 +1,24 @@
 import Link from 'next/link';
+import { Check, Rocket, Globe, Building2 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 
-const solutions = [
+const solutions: { tag: string; Icon: LucideIcon; headline: string; desc: string; points: string[] }[] = [
   {
-    tag: 'Enterprise', icon: '🏢',
+    tag: 'Enterprise', Icon: Building2,
     headline: 'Secure at Scale, Across Every Team',
     desc: 'Large engineering organizations use ResilioCheck AI to enforce consistent security standards across hundreds of repositories and dozens of teams. Role-based access control, Super Admin oversight, and enterprise billing give your CISO full visibility into your security posture.',
     points: ['Unlimited private repo scanning', 'Super Admin control plane', 'RBAC with team-level permissions', 'Dedicated priority support SLA'],
   },
   {
-    tag: 'Startups', icon: '🚀',
+    tag: 'Startups', Icon: Rocket,
     headline: 'Ship Fast Without Compromising Security',
-    desc: 'For fast-moving startups, ResilioCheck AI acts as a virtual security engineer — catching vulnerabilities, auto-remediating code, and ensuring you never accidentally ship a secret to GitHub. At $5/user/month, it\'s the most cost-effective security investment you can make.',
+    desc: "For fast-moving startups, ResilioCheck AI acts as a virtual security engineer — catching vulnerabilities, auto-remediating code, and ensuring you never accidentally ship a secret to GitHub. At $5/user/month, it's the most cost-effective security investment you can make.",
     points: ['Instant onboarding, no config required', 'Auto-remediation reduces security debt', 'CI/CD integration in under 5 minutes', 'Affordable Pro pricing'],
   },
   {
-    tag: 'Open Source', icon: '🌍',
+    tag: 'Open Source', Icon: Globe,
     headline: "Protect Your Community's Codebase",
-    desc: 'Maintainers of open source projects face unique security challenges — pull requests from unknown contributors, secret leaks in commit history, and dependency vulnerabilities. ResilioCheck AI\'s Community plan is free for public repositories.',
+    desc: "Maintainers of open source projects face unique security challenges — pull requests from unknown contributors, secret leaks in commit history, and dependency vulnerabilities. ResilioCheck AI's Community plan is free for public repositories.",
     points: ['Free for public GitHub repositories', 'Secret scanning on every PR', 'Dependency CVE detection', 'Community support forum'],
   },
 ];
@@ -41,11 +43,11 @@ export default function SolutionsPage() {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-          {solutions.map((s, i) => (
-            <div key={s.tag} style={{ display: 'grid', gridTemplateColumns: i % 2 === 0 ? '1fr 1fr' : '1fr 1fr', gap: 40, background: '#111113', border: '1px solid #27272a', borderRadius: 16, padding: '40px 36px', alignItems: 'center' }}>
+          {solutions.map((s) => (
+            <div key={s.tag} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 40, background: '#111113', border: '1px solid #27272a', borderRadius: 16, padding: '40px 36px', alignItems: 'center' }}>
               <div>
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: 'rgba(234,88,12,0.1)', border: '1px solid rgba(234,88,12,0.3)', borderRadius: 6, padding: '4px 12px', marginBottom: 20 }}>
-                  <span>{s.icon}</span>
+                  <s.Icon size={16} color="#ea580c" />
                   <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#ea580c' }}>{s.tag}</span>
                 </div>
                 <h2 style={{ fontSize: '1.4rem', fontWeight: 800, marginBottom: 12, marginTop: 0 }}>{s.headline}</h2>
@@ -56,7 +58,7 @@ export default function SolutionsPage() {
                 <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
                   {s.points.map(p => (
                     <li key={p} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '0.9rem', color: '#e4e4e7' }}>
-                      <span style={{ color: '#ea580c', fontWeight: 700 }}>✓</span> {p}
+                      <Check size={16} color="#ea580c" /> {p}
                     </li>
                   ))}
                 </ul>

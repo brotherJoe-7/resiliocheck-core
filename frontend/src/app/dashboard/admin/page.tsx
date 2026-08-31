@@ -3,6 +3,8 @@ import { useState, useEffect } from 'react';
 import Sidebar from '../../components/Sidebar';
 import { useAuth } from '../../context/AuthContext';
 import { useRouter } from 'next/navigation';
+import { Settings, AlertTriangle } from 'lucide-react';
+
 
 export default function AdminPage() {
   const { user, token, loading: authLoading } = useAuth();
@@ -65,7 +67,7 @@ export default function AdminPage() {
       <main className="rc-main">
         <div className="rc-page-hdr">
           <div>
-            <div className="rc-page-title">⚙ Super Admin Dashboard</div>
+            <div className="rc-page-title"><Settings size={24} /> Super Admin Dashboard</div>
             <div className="rc-page-sub">Manage all platform users, roles, and monitor global usage metrics.</div>
           </div>
         </div>
@@ -88,7 +90,7 @@ export default function AdminPage() {
 
         {error && (
           <div style={{ margin: '0 0 20px', padding: '12px 16px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 8, color: 'var(--red)', fontSize: '0.85rem' }}>
-            ⚠ {error} — Make sure the FastAPI backend is running on port 8000 and you are logged in.
+            <AlertTriangle size={16} /> {error} — Make sure the FastAPI backend is running on port 8000 and you are logged in.
           </div>
         )}
 
