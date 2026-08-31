@@ -46,7 +46,7 @@ export default function GatesPage() {
             <div className="rc-page-title">Security Gates</div>
             <div className="rc-page-sub">Configure proactive blocks in your CI/CD pipeline.</div>
           </div>
-          <button className="rc-btn-primary">Create Custom Gate</button>
+          <button className="rc-btn-primary" onClick={() => alert('Custom Gate creation wizard is coming soon.')}>Create Custom Gate</button>
         </div>
 
         {loading ? (

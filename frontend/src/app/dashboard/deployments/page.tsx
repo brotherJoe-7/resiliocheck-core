@@ -22,7 +22,7 @@ export default function DeploymentsPage() {
             <div className="rc-page-title">Deployments Pipeline</div>
             <div className="rc-page-sub">Real-time monitoring of CI/CD rollouts and security validations.</div>
           </div>
-          <button className="rc-btn-primary">Connect GitHub Actions</button>
+          <button className="rc-btn-primary" onClick={() => alert('GitHub Actions OAuth flow is coming soon.')}>Connect GitHub Actions</button>
         </div>
 
         {/* Dynamic KPI metrics derived from real scan data */}
@@ -94,7 +94,7 @@ export default function DeploymentsPage() {
 
                   <div style={{ display: 'flex', gap: 8, marginLeft: 24 }}>
                     {dep.actions.map((act: string) => (
-                      <button key={act} className={act === 'Rollback' || act === 'Cancel' ? 'rc-btn-secondary rc-btn-danger' : 'rc-btn-secondary'}>
+                      <button key={act} className={act === 'Rollback' || act === 'Cancel' ? 'rc-btn-secondary rc-btn-danger' : 'rc-btn-secondary'} onClick={() => alert(`${act} action is coming soon.`)}>
                         {act}
                       </button>
                     ))}

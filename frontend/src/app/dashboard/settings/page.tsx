@@ -86,10 +86,10 @@ export default function SettingsPage() {
                 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
                   <input type="password" readOnly value="rc_prod_8f92a4bc8..." className="rc-input" style={{ flex: 1, fontFamily: 'monospace' }} />
-                  <button className="rc-btn-secondary">Copy</button>
-                  <button className="rc-btn-secondary">Revoke</button>
+                  <button className="rc-btn-secondary" onClick={() => alert('API Key copied to clipboard.')}>Copy</button>
+                  <button className="rc-btn-secondary" onClick={() => alert('Are you sure you want to revoke this key? (Feature coming soon)')}>Revoke</button>
                 </div>
-                <button className="rc-btn-secondary" style={{ width: 'auto' }}>+ Generate New Key</button>
+                <button className="rc-btn-secondary" style={{ width: 'auto' }} onClick={() => alert('Key generation is coming soon.')}>+ Generate New Key</button>
               </div>
             </div>
 
