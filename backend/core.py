@@ -405,6 +405,18 @@ def apply_patch_and_validate(workspace_dir, patched_code):
         print("No patched code generated (code is clean or non-JS).")
         return "SKIPPED"
 
+    # Only run Docker syntax check on JS/TS patches; env/yaml/config files
+    # cannot be validated by `node --check` so skip them cleanly.
+    JS_LIKE_MARKERS = [
+        "function ", "const ", "let ", "var ", "import ", "export ",
+        "require(", "module.", "=>", "class ", "async ", "await ",
+    ]
+    is_js_like = any(marker in patched_code for marker in JS_LIKE_MARKERS)
+    if not is_js_like:
+        print("Patched code does not appear to be JS/TS — skipping Docker sandbox.")
+        return "SKIPPED"
+
+
     print(f"Writing patched code to {patched_file_path}")
     with open(patched_file_path, "w", encoding="utf-8") as f:
         f.write(patched_code)
