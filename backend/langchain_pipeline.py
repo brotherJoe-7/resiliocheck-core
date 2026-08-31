@@ -166,11 +166,11 @@ def run_gate_agent(owasp_result: dict) -> dict:
     return result
 
 
-def run_patch_agent(owasp_result: dict, source_files: dict) -> str:
+def run_patch_agent(owasp_result: dict, source_files: dict) -> tuple[str, str]:
     """
     Step 3: Patch Generator.
     Targets the highest-severity finding and generates a corrected code snippet.
-    Returns a string of patched code, or empty string if nothing to patch.
+    Returns a tuple of (patched_code, target_filename).
     """
     findings = owasp_result.get("findings", [])
     # Sort by severity
@@ -214,8 +214,8 @@ def run_patch_agent(owasp_result: dict, source_files: dict) -> str:
     patched = _call_groq(patch_system, user_msg, temperature=0.1)
     # Strip any accidental markdown fences
     patched = re.sub(r"```\w*\s*", "", patched).strip().rstrip("`").strip()
-    print(f"[Pipeline] Patch Agent generated {len(patched)} chars of patched code")
-    return patched
+    print(f"[Pipeline] Patch Agent generated {len(patched)} chars of patched code for {os.path.basename(target_file)}")
+    return patched, os.path.basename(target_file)
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +234,7 @@ def run_pipeline(source_files: dict, secret_findings: list) -> dict:
       gate_rationale   : str
       explanation      : human-readable summary string
       patched_code     : str (may be empty)
+      patched_filename : str (may be empty)
     """
     if not GROQ_API_KEY:
         raise RuntimeError("GROQ_API_KEY is not configured")
@@ -246,9 +247,10 @@ def run_pipeline(source_files: dict, secret_findings: list) -> dict:
 
     # Step 3: Patch generation (only if issues found)
     patched_code = ""
+    patched_filename = ""
     if owasp_result.get("findings"):
         try:
-            patched_code = run_patch_agent(owasp_result, source_files)
+            patched_code, patched_filename = run_patch_agent(owasp_result, source_files)
         except Exception as e:
             print(f"[Pipeline] Patch agent failed (non-fatal): {e}")
 
@@ -284,4 +286,5 @@ def run_pipeline(source_files: dict, secret_findings: list) -> dict:
         "gate_rationale": gate_result.get("rationale", ""),
         "explanation":    explanation,
         "patched_code":   patched_code,
+        "patched_filename": patched_filename,
     }

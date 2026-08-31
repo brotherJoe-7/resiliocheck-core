@@ -12,7 +12,7 @@ ResilioCheck AI is a modern, autonomous DevSecOps pipeline built with a dual arc
 
 The project is split into two primary services:
 1. **Frontend (`/frontend`)**: A Next.js 16 (React) application styled with Tailwind CSS, providing the dashboard and user interface.
-2. **Backend (`/backend`)**: A FastAPI Python server handling all AI scanning, Git integrations, and mock database storage for the dashboard.
+2. **Backend (`/backend`)**: A FastAPI Python server powered by a LangChain Multi-Agent workflow, utilizing SQLite for persistence and Docker for sandbox validation.
 
 ## 📦 Local Development
 
@@ -24,8 +24,8 @@ python -m venv venv
 venv\Scripts\activate  # Windows
 # source venv/bin/activate  # Mac/Linux
 
-# Install requirements (if not already installed)
-pip install fastapi uvicorn groq python-dotenv gitpython
+# Install requirements
+pip install fastapi uvicorn groq python-dotenv gitpython langchain langchain-groq sqlalchemy docker
 
 # Start the server (runs on port 8000)
 uvicorn backend.main:app --reload --port 8000
@@ -46,7 +46,8 @@ The Next.js frontend is fully dynamic and communicates with these FastAPI endpoi
 
 | Endpoint | Method | Description |
 |---|---|---|
-| `/api/scan` | `POST` | Initiates an AI security scan on a given GitHub repository. |
+| `/api/scan` | `POST` | Initiates the LangChain multi-agent pipeline on a GitHub repository. |
+| `/api/scans`| `GET`  | Retrieves persistent scan history from the SQLite database. |
 | `/api/agents` | `GET` | Retrieves the status of all autonomous agents. |
 | `/api/agents/{id}/toggle` | `POST` | Toggles an agent's active status. |
 | `/api/gates` | `GET` | Retrieves the status of security gates. |
@@ -58,10 +59,11 @@ The Next.js frontend is fully dynamic and communicates with these FastAPI endpoi
 
 The ResilioCheck AI platform consists of several core modules that work together to secure your development lifecycle:
 
-### 1. AI Vulnerability Scanner (Dashboard)
-The core engine of ResilioCheck. It takes a GitHub repository URL, downloads the source code into an isolated sandbox, and performs a two-stage scan:
-- **Stage 1**: Deterministic regex scanning for hardcoded secrets (API keys, passwords, tokens).
-- **Stage 2**: Deep static analysis (SAST) using the Groq Llama 3.3 LLM to find complex vulnerabilities (e.g., SQLi, XSS, Path Traversal) and automatically generate patch code to fix them.
+### 1. LangChain Multi-Agent AI Pipeline
+The core engine of ResilioCheck. It downloads the source code into an isolated sandbox, performing a deterministic pre-scan for secrets, followed by a 3-stage LLM workflow:
+- **OWASP Classification Agent**: Analyzes code files for deep semantic vulnerabilities (SQLi, Broken Access Control) returning structured JSON.
+- **Gate Decision Agent**: Enforces strict numeric policies (e.g. `BLOCKED` if Critical >= 1 or High >= 3) against the findings.
+- **Patch Generator & Sandbox**: Generates a targeted fix for the highest severity issue. The patched file is then written back to disk and syntax-validated inside a hardened Docker container, which dynamically supports multiple languages (`.js`, `.ts` via Node 22, `.py`, `.php`, `.rb`, `.sh`).
 
 ### 2. Security Gates
 Security Gates act as automated checkpoints in your CI/CD pipeline. When enabled, they evaluate every pull request or commit.

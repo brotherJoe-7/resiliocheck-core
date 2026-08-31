@@ -236,8 +236,9 @@ def run_scan(req: ScanRequest, db: Session = Depends(get_db)):
         # Optional sandbox validation of patched code
         sandbox_verdict = "SKIPPED"
         patched_code    = pipeline_result.get("patched_code", "")
+        patched_filename= pipeline_result.get("patched_filename", "patched_script.js")
         if patched_code:
-            sandbox_verdict = apply_patch_and_validate(workspace_dir, patched_code)
+            sandbox_verdict = apply_patch_and_validate(workspace_dir, patched_code, patched_filename)
 
         shutil.rmtree(workspace_dir, ignore_errors=True)
 

@@ -391,7 +391,7 @@ def run_ai_analysis(source_files, secret_findings=None):
         return "AI analysis failed.", None
 
 
-def apply_patch_and_validate(workspace_dir, patched_code):
+def apply_patch_and_validate(workspace_dir, patched_code, patched_filename="patched_script.js"):
     """
     Writes the AI-generated patch to disk and syntax-validates it inside a
     hardened, network-isolated Docker container.
@@ -399,37 +399,50 @@ def apply_patch_and_validate(workspace_dir, patched_code):
     Returns one of: "PASS", "FAIL", "SKIPPED", "ERROR" so callers (CLI and
     dashboard) can surface the real sandbox verdict instead of guessing.
     """
-    patched_file_path = os.path.join(workspace_dir, "patched_script.js")
-
     if not (patched_code and patched_code.strip()):
-        print("No patched code generated (code is clean or non-JS).")
+        print("No patched code generated.")
         return "SKIPPED"
 
-    # Only run Docker syntax check on JS/TS patches; env/yaml/config files
-    # cannot be validated by `node --check` so skip them cleanly.
-    JS_LIKE_MARKERS = [
-        "function ", "const ", "let ", "var ", "import ", "export ",
-        "require(", "module.", "=>", "class ", "async ", "await ",
-    ]
-    is_js_like = any(marker in patched_code for marker in JS_LIKE_MARKERS)
-    if not is_js_like:
-        print("Patched code does not appear to be JS/TS — skipping Docker sandbox.")
-        return "SKIPPED"
+    patched_file_path = os.path.join(workspace_dir, patched_filename)
 
+    ext = os.path.splitext(patched_filename)[1].lower()
+    
+    if ext == ".py":
+        image = "python:3.11-alpine"
+        command = f"python -m py_compile /workspace/{patched_filename}"
+    elif ext in [".js", ".jsx"]:
+        image = "node:22-alpine"
+        command = f"node --check /workspace/{patched_filename}"
+    elif ext in [".ts", ".tsx"]:
+        image = "node:22-alpine"
+        # Node 22.6+ supports native TS execution/checking via strip-types
+        command = f"node --experimental-strip-types --check /workspace/{patched_filename}"
+    elif ext == ".php":
+        image = "php:8.2-cli-alpine"
+        command = f"php -l /workspace/{patched_filename}"
+    elif ext == ".rb":
+        image = "ruby:3.2-alpine"
+        command = f"ruby -c /workspace/{patched_filename}"
+    elif ext == ".sh":
+        image = "bash:latest"
+        command = f"bash -n /workspace/{patched_filename}"
+    else:
+        print(f"File type {ext} cannot be safely syntax checked without dependencies — skipping Docker sandbox.")
+        return "SKIPPED"
 
     print(f"Writing patched code to {patched_file_path}")
     with open(patched_file_path, "w", encoding="utf-8") as f:
         f.write(patched_code)
 
-    print("Running Docker Sandbox Validation...")
+    print(f"Running Docker Sandbox Validation ({image})...")
     container = None
     try:
         client        = docker.from_env()
         abs_workspace = os.path.abspath(workspace_dir)
 
         container = client.containers.run(
-            "node:18-alpine",
-            command="node --check /workspace/patched_script.js",
+            image,
+            command=command,
             volumes={abs_workspace: {"bind": "/workspace", "mode": "ro"}},
             # ✅ SECURITY: hardened profile — no network, read-only root fs,
             # no capabilities, no privilege escalation, resource limits.
