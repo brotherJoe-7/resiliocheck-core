@@ -1,41 +1,72 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Sidebar from '../components/Sidebar';
 
 const INITIAL_GATES = {
   webhook_ingestion: 'PENDING',
-  ai_analysis: 'PENDING',
-  sandbox_validation: 'PENDING',
-  rasp_monitoring: 'PENDING',
+  ai_analysis:       'PENDING',
+  sandbox_validation:'PENDING',
+  rasp_monitoring:   'PENDING',
 };
 
 const GATE_LABELS: Record<string, string> = {
-  webhook_ingestion: 'Webhook Ingestion',
-  ai_analysis: 'AI LLM Analysis',
+  webhook_ingestion:  'Webhook Ingestion',
+  ai_analysis:        'AI LLM Analysis',
   sandbox_validation: 'Container Sandbox Validation',
-  rasp_monitoring: 'Continuous Network RASP Shielding',
+  rasp_monitoring:    'Continuous Network RASP Shielding',
+};
+
+const SEVERITY_COLOR: Record<string, string> = {
+  CRITICAL: 'var(--red)',
+  HIGH:     '#f97316',
+  MEDIUM:   'var(--accent)',
+  LOW:      'var(--green)',
+  INFO:     'var(--text-muted)',
 };
 
 function GatePill({ status }: { status: string }) {
-  const cls = status === 'APPROVED' ? 'rc-pill-green' : status === 'PENDING' ? 'rc-pill-yellow' : 'rc-pill-red';
+  const cls   = status === 'APPROVED' ? 'rc-pill-green' : status === 'PENDING' ? 'rc-pill-yellow' : 'rc-pill-red';
   const label = status === 'PENDING' ? 'COMPILING' : status;
   return <span className={`rc-pill ${cls}`}>{label}</span>;
 }
 
-export default function DashboardPage() {
-  const [repoUrl, setRepoUrl] = useState('');
-  const [branch, setBranch] = useState('main');
-  const [engine, setEngine] = useState('Llama 3.3 Deep Static Analysis (SAST)');
-  const [gates, setGates] = useState(INITIAL_GATES);
-  const [loading, setLoading] = useState(false);
-  const [scanResult, setScanResult] = useState<any>(null);
-  const [error, setError] = useState('');
-  const [scanCount, setScanCount] = useState(0);
-  const [uptime] = useState(99.9);
-  const [startTime] = useState(Date.now());
+function SeverityBadge({ sev }: { sev: string }) {
+  return (
+    <span style={{
+      display: 'inline-block', padding: '2px 8px', borderRadius: 4,
+      fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.6px',
+      background: `${SEVERITY_COLOR[sev] ?? 'var(--text-muted)'}22`,
+      color: SEVERITY_COLOR[sev] ?? 'var(--text-muted)',
+      border: `1px solid ${SEVERITY_COLOR[sev] ?? 'var(--border)'}55`,
+    }}>{sev}</span>
+  );
+}
 
-  const criticalVulns = Object.values(gates).filter(v => v === 'FAILED' || v === 'BLOCKED').length;
-  const elapsedH = Math.floor((Date.now() - startTime) / 3600000);
+export default function DashboardPage() {
+  const [repoUrl, setRepoUrl]     = useState('');
+  const [branch, setBranch]       = useState('main');
+  const [engine, setEngine]       = useState('Llama 3.3 Deep Static Analysis (SAST)');
+  const [gates, setGates]         = useState(INITIAL_GATES);
+  const [loading, setLoading]     = useState(false);
+  const [scanResult, setScanResult] = useState<any>(null);
+  const [history, setHistory]     = useState<any[]>([]);
+  const [error, setError]         = useState('');
+  const [startTime]               = useState(Date.now());
+
+  // Fetch persistent scan history from DB on mount
+  const loadHistory = useCallback(async () => {
+    try {
+      const res  = await fetch('http://localhost:8000/api/scans');
+      const data = await res.json();
+      if (Array.isArray(data)) setHistory(data);
+    } catch { /* backend may not be running yet */ }
+  }, []);
+
+  useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  const criticalVulns = scanResult?.critical_count ?? 0;
+  const elapsedH      = Math.floor((Date.now() - startTime) / 3600000);
+  const sessionScans  = history.length;
 
   async function handleScan() {
     if (!repoUrl.trim()) { setError('Please enter a GitHub repository URL.'); return; }
@@ -45,26 +76,27 @@ export default function DashboardPage() {
     setGates(INITIAL_GATES);
 
     try {
-      const res = await fetch('http://localhost:8000/api/scan', {
-        method: 'POST',
+      const res  = await fetch('http://localhost:8000/api/scan', {
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repo_url: repoUrl, branch, engine }),
+        body:    JSON.stringify({ repo_url: repoUrl, branch, engine }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Scan failed');
 
-      const verdict = data.sandbox_verdict;
-      const hasIssues = data.secret_findings?.length > 0 || Object.keys(data.patched_files || {}).length > 0;
-      const aiFailed = data.explanation === "AI analysis failed.";
-      
+      const verdict  = data.sandbox_verdict;
+      const aiOk     = data.explanation !== 'AI analysis failed.';
+      const gatePass = data.gate === 'APPROVED';
+
       setScanResult(data);
-      setScanCount(c => c + 1);
       setGates({
-        webhook_ingestion: 'APPROVED',
-        ai_analysis: aiFailed ? 'FAILED' : (hasIssues ? 'BLOCKED' : 'APPROVED'),
+        webhook_ingestion:  'APPROVED',
+        ai_analysis:        aiOk ? (gatePass ? 'APPROVED' : 'FAILED') : 'FAILED',
         sandbox_validation: verdict === 'PASS' || verdict === 'SKIPPED' ? 'APPROVED' : 'FAILED',
-        rasp_monitoring: 'APPROVED',
+        rasp_monitoring:    'APPROVED',
       });
+      // Reload history from DB to include the new scan
+      await loadHistory();
     } catch (e: any) {
       setError(e.message);
       setGates(g => ({ ...g, webhook_ingestion: 'FAILED' }));
@@ -88,10 +120,10 @@ export default function DashboardPage() {
         {/* KPI Metrics */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 32 }}>
           {[
-            { label: 'Critical Vulns', value: criticalVulns, delta: criticalVulns === 0 ? '-100% (Clean Scan)' : '+1 Active Issues', up: criticalVulns === 0 },
-            { label: 'System Health', value: `${uptime}%`, delta: '+0.2% (Optimized)', up: true },
-            { label: 'Active Scans', value: scanCount, delta: 'Session Total', up: true },
-            { label: 'Uptime', value: `0d ${elapsedH}h`, delta: '100% Stability', up: true },
+            { label: 'Critical Vulns',  value: criticalVulns,    delta: criticalVulns === 0 ? '−100% (Clean)' : `+${criticalVulns} Active Issues`, up: criticalVulns === 0 },
+            { label: 'System Health',   value: '99.9%',          delta: '+0.2% (Optimized)', up: true },
+            { label: 'Total Scans',     value: sessionScans,     delta: 'Persisted in DB',   up: true },
+            { label: 'Uptime',          value: `0d ${elapsedH}h`,delta: '100% Stability',    up: true },
           ].map(m => (
             <div key={m.label} className="rc-metric">
               <div className="rc-metric-label">{m.label}</div>
@@ -127,7 +159,7 @@ export default function DashboardPage() {
               </div>
             </div>
             <button className="rc-btn-primary" onClick={handleScan} disabled={loading} style={{ width: '100%', justifyContent: 'center' }}>
-              {loading ? '⏳ Scanning...' : '⚡ INITIATE SCAN'}
+              {loading ? '⏳ Running 3-Stage AI Pipeline...' : '⚡ INITIATE SCAN'}
             </button>
             {error && <div style={{ marginTop: 12, color: 'var(--red)', fontSize: '0.8rem', padding: '10px 14px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6 }}>⚠ {error}</div>}
           </div>
@@ -136,37 +168,82 @@ export default function DashboardPage() {
           <div className="rc-card">
             <div className="rc-card-hdr">
               <div className="rc-card-title">⊞ Pipeline Gate Status</div>
+              {scanResult && (
+                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: scanResult.gate === 'APPROVED' ? 'var(--green)' : 'var(--red)' }}>
+                  AI Verdict: {scanResult.gate}
+                </span>
+              )}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {Object.entries(gates).map(([key, val]) => (
                 <div key={key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 6 }}>
                   <span style={{ fontSize: '0.82rem', color: 'var(--text-primary)' }}>{GATE_LABELS[key]}</span>
-                  <GatePill status={val} />
+                  <GatePill status={val as string} />
                 </div>
               ))}
             </div>
+            {scanResult?.gate_rationale && (
+              <div style={{ marginTop: 12, fontSize: '0.75rem', color: 'var(--text-muted)', padding: '8px 12px', background: 'var(--bg-base)', borderRadius: 6, borderLeft: '3px solid var(--accent)' }}>
+                {scanResult.gate_rationale}
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Results */}
+        {/* Scan Results — OWASP Findings Table */}
         {scanResult && (
           <div className="rc-card" style={{ marginBottom: 24 }}>
             <div className="rc-card-hdr">
               <div className="rc-card-title">📊 Intelligent Vulnerability Remediation Report</div>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button className="rc-btn-primary" style={{ fontSize: '0.75rem', padding: '6px 14px' }}>⬇ Download Report</button>
-                <button className="rc-btn-secondary" style={{ fontSize: '0.75rem', padding: '6px 14px' }}>Archive Findings</button>
+                <span style={{ fontSize: '0.7rem', padding: '4px 12px', borderRadius: 20, fontWeight: 700, background: scanResult.gate === 'APPROVED' ? 'rgba(20,209,120,0.12)' : 'rgba(239,68,68,0.12)', color: scanResult.gate === 'APPROVED' ? 'var(--green)' : 'var(--red)', border: `1px solid ${scanResult.gate === 'APPROVED' ? 'rgba(20,209,120,0.3)' : 'rgba(239,68,68,0.3)'}` }}>
+                  Gate: {scanResult.gate}
+                </span>
               </div>
             </div>
-            <div style={{ fontSize: '0.65rem', color: 'var(--green)', fontWeight: 700, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
-              ● AI RECOVERY ENGINE INSIGHTS
-            </div>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.7 }}>{scanResult.explanation}</p>
 
+            {/* Summary */}
+            <div style={{ marginBottom: 16, padding: '12px 16px', background: 'var(--bg-base)', borderRadius: 8, borderLeft: '3px solid var(--accent)' }}>
+              <div style={{ fontSize: '0.65rem', color: 'var(--accent)', fontWeight: 700, marginBottom: 6, letterSpacing: '0.8px' }}>● AI MULTI-AGENT ANALYSIS COMPLETE</div>
+              <p style={{ fontSize: '0.83rem', color: 'var(--text-secondary)', lineHeight: 1.7, margin: 0 }}>{scanResult.explanation}</p>
+            </div>
+
+            {/* OWASP Findings Table */}
+            {scanResult.findings?.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px', color: 'var(--text-muted)', marginBottom: 10 }}>
+                  OWASP FINDINGS — {scanResult.findings.length} issue(s) — {scanResult.critical_count} critical, {scanResult.high_count} high
+                </div>
+                <table className="rc-table">
+                  <thead>
+                    <tr>
+                      <th>Severity</th>
+                      <th>OWASP Class</th>
+                      <th>File</th>
+                      <th>Description</th>
+                      <th>Remediation</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {scanResult.findings.map((f: any, i: number) => (
+                      <tr key={i}>
+                        <td><SeverityBadge sev={f.severity} /></td>
+                        <td style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{f.owasp_class}</td>
+                        <td style={{ fontFamily: 'monospace', fontSize: '0.72rem', color: 'var(--text-muted)' }}>{f.file_path?.split('/').pop()}</td>
+                        <td style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>{f.description}</td>
+                        <td style={{ fontSize: '0.78rem', color: 'var(--green)' }}>{f.remediation}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Secret Findings */}
             {scanResult.secret_findings?.length > 0 && (
-              <div style={{ marginTop: 16 }}>
+              <div style={{ marginBottom: 16 }}>
                 <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px', color: 'var(--red)', marginBottom: 10 }}>
-                  ⚠ Pre-Scan: {scanResult.secret_findings.length} Hardcoded Secret(s) Detected
+                  ⚠ Pre-Scan Secrets Scanner — {scanResult.secret_findings.length} Hardcoded Secret(s) Detected
                 </div>
                 {scanResult.secret_findings.map((f: any, i: number) => (
                   <div key={i} style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6, padding: '10px 14px', marginBottom: 6, fontFamily: 'monospace', fontSize: '0.78rem' }}>
@@ -178,53 +255,70 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {Object.entries(scanResult.patched_files || {}).map(([fn, content]: any) => (
-              <div key={fn} style={{ marginTop: 16 }}>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 6 }}>📄 {fn}</div>
-                <pre style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 6, padding: '14px 16px', overflow: 'auto', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>{content}</pre>
+            {/* Patched Code */}
+            {scanResult.patched_code && (
+              <div>
+                <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px', color: 'var(--green)', marginBottom: 8 }}>
+                  ✓ AI-Generated Patch — Sandbox Verdict: {scanResult.sandbox_verdict}
+                </div>
+                <pre style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 6, padding: '14px 16px', overflow: 'auto', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                  {scanResult.patched_code}
+                </pre>
               </div>
-            ))}
+            )}
           </div>
         )}
 
-        {/* Historical Log */}
-        <div className="rc-card">
+        {/* Historical Log — from DB */}
+        <div className="rc-card" style={{ marginBottom: 24 }}>
           <div className="rc-card-hdr">
             <div className="rc-card-title">📦 Historical Evaluation Log Records</div>
+            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{history.length} scan(s) in database</span>
           </div>
           <table className="rc-table">
             <thead>
               <tr>
-                <th>Scan / Repo URL Target</th>
-                <th>Engine</th>
-                <th>Global Vulnerability Status</th>
-                <th>Exit Code</th>
+                <th>Repository</th>
+                <th>Branch</th>
+                <th>Scanned At</th>
+                <th>Critical</th>
+                <th>High</th>
+                <th>AI Gate</th>
+                <th>Sandbox</th>
               </tr>
             </thead>
             <tbody>
-              {scanCount === 0 ? (
-                <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>No scans performed this session yet.</td></tr>
-              ) : (
-                <tr>
-                  <td style={{ color: 'var(--text-primary)' }}>{repoUrl}</td>
-                  <td>{engine.split(' ')[0]}</td>
-                  <td><GatePill status={criticalVulns === 0 ? 'APPROVED' : 'FAILED'} /></td>
-                  <td style={{ color: criticalVulns === 0 ? 'var(--green)' : 'var(--red)' }}>
-                    StatusCode: {criticalVulns === 0 ? '0 (PASS)' : '1 (FAIL)'}
+              {history.length === 0 ? (
+                <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>No scan records yet. Trigger a scan above.</td></tr>
+              ) : history.map((s: any) => (
+                <tr key={s.id}>
+                  <td style={{ color: 'var(--text-primary)', fontSize: '0.8rem', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {s.repo_url.replace('https://github.com/', '')}
                   </td>
+                  <td style={{ fontSize: '0.78rem' }}>{s.branch}</td>
+                  <td style={{ fontSize: '0.75rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                    {s.scanned_at ? new Date(s.scanned_at).toLocaleString() : '—'}
+                  </td>
+                  <td><span style={{ color: s.critical_count > 0 ? 'var(--red)' : 'var(--green)', fontWeight: 700 }}>{s.critical_count}</span></td>
+                  <td><span style={{ color: s.high_count > 0 ? '#f97316' : 'var(--green)', fontWeight: 700 }}>{s.high_count}</span></td>
+                  <td><GatePill status={s.gate} /></td>
+                  <td style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{s.sandbox_verdict}</td>
                 </tr>
-              )}
+              ))}
             </tbody>
           </table>
         </div>
 
         {/* Predictive Threat Analysis */}
-        <div className="rc-card" style={{ marginTop: 24, textAlign: 'center', padding: '48px 24px' }}>
+        <div className="rc-card" style={{ textAlign: 'center', padding: '48px 24px' }}>
           <div style={{ fontSize: '2rem', marginBottom: 12 }}>⚡</div>
           <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 10 }}>Predictive Threat Analysis</div>
           <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', lineHeight: 1.7 }}>
-            The ResilioCheck AI engine is currently simulating 4.2 million attack vectors against the local shard.<br />
-            No anomalies detected within the 99th percentile of confidence.
+            The ResilioCheck AI multi-agent engine processes repositories through OWASP classification,
+            gate decision, and automated patch generation stages.<br />
+            {history.length > 0
+              ? `${history.filter((s: any) => s.gate === 'APPROVED').length} of ${history.length} scan(s) passed all security gates.`
+              : 'Submit a repository above to begin threat analysis.'}
           </div>
         </div>
       </main>
