@@ -1,4 +1,5 @@
 'use client';
+import { fetchApi } from '../../utils/apiClient';
 import { useState, useEffect } from 'react';
 import Sidebar from '../../components/Sidebar';
 import { useAuth } from '../../context/AuthContext';
@@ -22,11 +23,11 @@ export default function AdminPage() {
 
     const headers = { Authorization: `Bearer ${token}` };
     Promise.all([
-      fetch('http://localhost:8000/api/admin/users', { headers }).then(r => {
+      fetchApi('/api/admin/users', { headers }).then(r => {
         if (!r.ok) throw new Error(`Users fetch failed: ${r.status}`);
         return r.json();
       }),
-      fetch('http://localhost:8000/api/admin/stats', { headers }).then(r => {
+      fetchApi('/api/admin/stats', { headers }).then(r => {
         if (!r.ok) throw new Error(`Stats fetch failed: ${r.status}`);
         return r.json();
       }),
@@ -41,7 +42,7 @@ export default function AdminPage() {
   }, [user, token, authLoading]);
 
   async function updateRole(userId: number, newRole: string) {
-    await fetch(`http://localhost:8000/api/admin/users/${userId}/role?role=${newRole}`, {
+    await fetchApi(`/api/admin/users/${userId}/role?role=${newRole}`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -49,7 +50,7 @@ export default function AdminPage() {
   }
 
   async function deactivate(userId: number) {
-    await fetch(`http://localhost:8000/api/admin/users/${userId}`, {
+    await fetchApi(`/api/admin/users/${userId}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${token}` },
     });

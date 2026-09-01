@@ -232,7 +232,15 @@ def scan_for_secrets(source_files):
     independently of whether the AI model flags them.
     """
     findings = []
+    
+    # Files that usually contain mock/placeholder credentials
+    mock_files = {".env.example", ".env.sample", ".env.template"}
+    
     for filepath, content in source_files.items():
+        basename = os.path.basename(filepath)
+        if basename in mock_files:
+            continue
+            
         lines = content.splitlines()
         for lineno, line in enumerate(lines, start=1):
             # Skip obviously commented-out lines
@@ -242,7 +250,7 @@ def scan_for_secrets(source_files):
             for label, pattern in SECRET_PATTERNS:
                 if pattern.search(line):
                     findings.append({
-                        "file":    os.path.basename(filepath),
+                        "file":    basename,
                         "line":    lineno,
                         "pattern": label,
                         "snippet": line.strip()[:120],
@@ -473,6 +481,10 @@ def apply_patch_and_validate(workspace_dir, patched_code, patched_filename="patc
         print("No patched code generated — skipping sandbox.")
         return "SKIPPED"
 
+    # C2: Sanitize patched_filename to prevent command injection / path traversal
+    if not re.match(r"^[A-Za-z0-9._\-]+$", patched_filename):
+        patched_filename = "patched_script.txt"
+
     patched_file_path = os.path.join(workspace_dir, patched_filename)
     ext = os.path.splitext(patched_filename)[1].lower()
     project_type = _detect_project_type(workspace_dir)
@@ -497,94 +509,92 @@ def apply_patch_and_validate(workspace_dir, patched_code, patched_filename="patc
         client = docker.from_env()
         abs_workspace = os.path.abspath(workspace_dir)
 
-        # ── Select image, SAST command, and syntax command by language ──────
+        image = "resiliocheck-sandbox:latest"
+
+        # ── Select SAST command, and syntax command by language ──────
+        # We pass patched_filename as $1 to avoid shell string interpolation (C2)
         if ext == ".py" or project_type == "python":
-            image = "python:3.11-slim"
-            # Layer 1 SAST: bandit security scanner
-            # Layer 2 Deps: pip-audit for CVEs
-            # Layer 3 Syntax: py_compile on the patched file
-            command = (
-                "sh -c \""
-                "pip install --quiet bandit pip-audit 2>/dev/null; "
-                f"bandit -r /workspace -ll -q --exclude /workspace/node_modules 2>&1 | head -60; "
-                f"pip-audit --requirement /workspace/requirements.txt -q 2>/dev/null | head -30; "
-                f"python -m py_compile /workspace/{patched_filename} && echo 'SYNTAX:OK' || echo 'SYNTAX:FAIL'\""
-            )
+            command = [
+                "sh", "-c",
+                "bandit -r /workspace -f json -ll -q --exclude /workspace/node_modules 2>/dev/null > /tmp/sast.json; "
+                "python -m py_compile /workspace/\"$1\" && echo 'SYNTAX:OK' || echo 'SYNTAX:FAIL'; "
+                "cat /tmp/sast.json",
+                "sh", patched_filename
+            ]
         elif ext in (".js", ".jsx") or (project_type == "node" and ext not in (".ts", ".tsx")):
-            image = "node:22-alpine"
-            # Layer 1 SAST: semgrep javascript rules
-            # Layer 2 Deps: npm audit
-            # Layer 3 Syntax: node --check
-            command = (
-                "sh -c \""
-                "npm install --quiet -g semgrep 2>/dev/null || true; "
-                f"semgrep --config=p/javascript /workspace --quiet 2>&1 | head -60; "
-                f"cd /workspace && npm audit --audit-level=high 2>&1 | head -30; "
-                f"node --check /workspace/{patched_filename} && echo 'SYNTAX:OK' || echo 'SYNTAX:FAIL'\""
-            )
+            command = [
+                "sh", "-c",
+                "semgrep --config=p/javascript /workspace --json --quiet 2>/dev/null > /tmp/sast.json; "
+                "node --check /workspace/\"$1\" && echo 'SYNTAX:OK' || echo 'SYNTAX:FAIL'; "
+                "cat /tmp/sast.json",
+                "sh", patched_filename
+            ]
         elif ext in (".ts", ".tsx"):
-            image = "node:22-alpine"
-            command = (
-                "sh -c \""
-                "npm install --quiet -g semgrep 2>/dev/null || true; "
-                f"semgrep --config=p/typescript /workspace --quiet 2>&1 | head -60; "
-                f"cd /workspace && npm audit --audit-level=high 2>&1 | head -30; "
-                f"node --experimental-strip-types --check /workspace/{patched_filename} && echo 'SYNTAX:OK' || echo 'SYNTAX:FAIL'\""
-            )
+            command = [
+                "sh", "-c",
+                "semgrep --config=p/typescript /workspace --json --quiet 2>/dev/null > /tmp/sast.json; "
+                "node --experimental-strip-types --check /workspace/\"$1\" && echo 'SYNTAX:OK' || echo 'SYNTAX:FAIL'; "
+                "cat /tmp/sast.json",
+                "sh", patched_filename
+            ]
         elif ext == ".php":
-            image = "php:8.2-cli-alpine"
-            command = (
-                "sh -c \""
-                f"php -l /workspace/{patched_filename} && echo 'SYNTAX:OK' || echo 'SYNTAX:FAIL'\""
-            )
+            command = ["sh", "-c", "php -l /workspace/\"$1\" && echo 'SYNTAX:OK' || echo 'SYNTAX:FAIL'", "sh", patched_filename]
         elif ext == ".rb":
-            image = "ruby:3.2-alpine"
-            command = (
-                "sh -c \""
-                f"ruby -c /workspace/{patched_filename} && echo 'SYNTAX:OK' || echo 'SYNTAX:FAIL'\""
-            )
+            command = ["sh", "-c", "ruby -c /workspace/\"$1\" && echo 'SYNTAX:OK' || echo 'SYNTAX:FAIL'", "sh", patched_filename]
         elif ext == ".sh":
-            image = "bash:latest"
-            command = (
-                "sh -c \""
-                f"bash -n /workspace/{patched_filename} && echo 'SYNTAX:OK' || echo 'SYNTAX:FAIL'\""
-            )
+            command = ["sh", "-c", "bash -n /workspace/\"$1\" && echo 'SYNTAX:OK' || echo 'SYNTAX:FAIL'", "sh", patched_filename]
         else:
             print(f"File type {ext} — running generic semgrep SAST only.")
-            image = "python:3.11-slim"
-            command = (
-                "sh -c \""
-                "pip install --quiet semgrep 2>/dev/null; "
-                f"semgrep --config=p/secrets /workspace --quiet 2>&1 | head -60; "
-                "echo 'SYNTAX:SKIPPED'\""
-            )
+            command = [
+                "sh", "-c",
+                "semgrep --config=p/secrets /workspace --json --quiet 2>/dev/null > /tmp/sast.json; "
+                "echo 'SYNTAX:SKIPPED'; "
+                "cat /tmp/sast.json",
+                "sh", patched_filename
+            ]
 
         container = client.containers.run(
             image,
             command=command,
             volumes={abs_workspace: {"bind": "/workspace", "mode": "ro"}},
-            # ✅ SECURITY: hardened profile — no network, read-only root fs,
-            # no capabilities, no privilege escalation, resource limits.
-            # NOTE: network_disabled is False here only to allow pip/npm to
-            # install SAST tools (semgrep, bandit) inside the container.
-            # The ANALYSED CODE itself never runs — only linters execute.
-            network_disabled=False,
-            read_only=False,           # needs tmp space for tool installation
+            # C4: Hardened profile restored
+            network_disabled=True,
+            read_only=True,
             cap_drop=["ALL"],
             security_opt=["no-new-privileges:true"],
             mem_limit="512m",
             pids_limit=128,
             detach=True,
             remove=False,
+            # Provide tmpfs for tools to write temp logs
+            tmpfs={'/tmp': '', '/run': ''}
         )
 
         exit_status = container.wait(timeout=180)
         logs = container.logs().decode("utf-8", errors="replace")
 
-        print(f"Sandbox logs:\n{logs[:800]}")
-
         syntax_ok = "SYNTAX:OK" in logs or "SYNTAX:SKIPPED" in logs
-        has_critical = any(w in logs.lower() for w in ["critical", "high severity", "severity: high"])
+        
+        # H6: Parse JSON output robustly instead of fragile substring matching
+        has_critical = False
+        try:
+            # Find the JSON block in the logs
+            match = re.search(r'\{[\s\S]*\}', logs)
+            if match:
+                sast_data = json.loads(match.group(0))
+                
+                # Check bandit JSON structure
+                if "results" in sast_data and any(r.get("issue_severity", "").lower() in ["high", "critical"] for r in sast_data["results"]):
+                    has_critical = True
+                
+                # Check semgrep JSON structure
+                if "results" in sast_data and any(r.get("extra", {}).get("severity", "").lower() in ["error", "high", "critical"] for r in sast_data["results"]):
+                    has_critical = True
+        except Exception as e:
+            print(f"Failed to parse SAST JSON output: {e}")
+            # Fallback to loose check only if JSON parsing totally fails
+            if any(w in logs.lower() for w in ["critical", "high severity", "severity: error", "severity: high"]):
+                has_critical = True
 
         if syntax_ok and not has_critical:
             print("Sandbox Validation: PASS")
@@ -600,13 +610,6 @@ def apply_patch_and_validate(workspace_dir, patched_code, patched_filename="patc
         print(f"ERROR: Docker sandbox failed: {str(e)}")
         return "ERROR"
     finally:
-        if container is not None:
-            try:
-                container.remove(force=True)
-            except Exception:
-                pass
-
-
         if container is not None:
             try:
                 container.remove(force=True)

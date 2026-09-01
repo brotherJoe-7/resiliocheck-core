@@ -1,4 +1,5 @@
 'use client';
+import { fetchApi } from '../../utils/apiClient';
 import { useState, useEffect, useCallback } from 'react';
 import Sidebar from '../components/Sidebar';
 import { Zap, Check, AlertTriangle, Hourglass, LayoutGrid, X, CheckCircle2 } from 'lucide-react';
@@ -60,7 +61,7 @@ export default function DashboardPage() {
   // Fetch persistent scan history from DB on mount
   const loadHistory = useCallback(async () => {
     try {
-      const res  = await fetch('http://localhost:8000/api/scans');
+      const res  = await fetchApi('/api/scans');
       const data = await res.json();
       if (Array.isArray(data)) setHistory(data);
     } catch { /* backend may not be running yet */ }
@@ -72,7 +73,7 @@ export default function DashboardPage() {
     setPatchLoading(true);
     setPatchToast(null);
     try {
-      const res  = await fetch(`http://localhost:8000/api/scans/${scanId}/apply-patch`, { method: 'POST' });
+      const res  = await fetchApi(`/api/scans/${scanId}/apply-patch`, { method: 'POST' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Failed to create PR');
       setPatchToast({ type: 'success', msg: `<CheckCircle2 size={16} /> Pull Request created!`, url: data.pr_url });
@@ -90,7 +91,7 @@ export default function DashboardPage() {
     setPatchLoading(true);
     setPatchToast(null);
     try {
-      await fetch(`http://localhost:8000/api/scans/${scanId}/reject-patch`, { method: 'POST' });
+      await fetchApi(`/api/scans/${scanId}/reject-patch`, { method: 'POST' });
       setPatchToast({ type: 'error', msg: '<X size={16} className="text-red-500" /> Patch rejected.' });
       setScanResult((prev: any) => prev ? { ...prev, patch_status: 'REJECTED' } : prev);
       await loadHistory();
@@ -113,7 +114,7 @@ export default function DashboardPage() {
     setGates(INITIAL_GATES);
 
     try {
-      const res  = await fetch('http://localhost:8000/api/scan', {
+      const res  = await fetchApi('/api/scan', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ repo_url: repoUrl, branch, engine }),

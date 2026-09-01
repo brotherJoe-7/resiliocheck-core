@@ -29,9 +29,12 @@ app = FastAPI(title="ResilioCheck AI Backend")
 app.include_router(auth.router)
 app.include_router(admin.router)
 
+from fastapi.concurrency import run_in_threadpool
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    # C5: Restrict CORS origin
+    allow_origins=[os.getenv("FRONTEND_URL", "http://localhost:3000")],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -203,8 +206,10 @@ def health_check():
     return {"status": "online", "service": "ResilioCheck AI Core Engine"}
 
 
+from backend.auth import get_current_user, require_admin
+
 @app.post("/api/scan")
-def run_scan(req: ScanRequest, db: Session = Depends(get_db)):
+async def run_scan(req: ScanRequest, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     if not os.getenv("GROQ_API_KEY"):
         raise HTTPException(status_code=500, detail="GROQ_API_KEY is not configured")
 
@@ -215,8 +220,22 @@ def run_scan(req: ScanRequest, db: Session = Depends(get_db)):
         shutil.rmtree(workspace_dir, ignore_errors=True)
         os.makedirs(workspace_dir, exist_ok=True)
 
-        download_and_extract_repo(req.repo_url, workspace_dir)
-        source_files = gather_source_files(workspace_dir)
+        # H4: Run expensive static analysis / network requests in threadpool
+        def _run_scan_blocking():
+            download_and_extract_repo(req.repo_url, workspace_dir)
+            srcs = gather_source_files(workspace_dir)
+            if not srcs:
+                return None, None, None, None
+            secrets = scan_for_secrets(srcs)
+            pipe_res = run_pipeline(srcs, secrets)
+            verdict = "SKIPPED"
+            p_code = pipe_res.get("patched_code", "")
+            p_file = pipe_res.get("patched_filename", "patched_script.js")
+            if p_code:
+                verdict = apply_patch_and_validate(workspace_dir, p_code, p_file)
+            return srcs, secrets, pipe_res, verdict
+
+        source_files, secret_findings, pipeline_result, sandbox_verdict = await run_in_threadpool(_run_scan_blocking)
 
         if not source_files:
             shutil.rmtree(workspace_dir, ignore_errors=True)
@@ -230,17 +249,8 @@ def run_scan(req: ScanRequest, db: Session = Depends(get_db)):
             db.refresh(result)
             return _scan_to_dict(result)
 
-        secret_findings = scan_for_secrets(source_files)
-
-        # Run the multi-agent LangChain pipeline
-        pipeline_result = run_pipeline(source_files, secret_findings)
-
-        # Optional sandbox validation of patched code
-        sandbox_verdict = "SKIPPED"
-        patched_code    = pipeline_result.get("patched_code", "")
-        patched_filename= pipeline_result.get("patched_filename", "patched_script.js")
-        if patched_code:
-            sandbox_verdict = apply_patch_and_validate(workspace_dir, patched_code, patched_filename)
+        patched_code = pipeline_result.get("patched_code", "")
+        patched_filename = pipeline_result.get("patched_filename", "patched_script.js")
 
         shutil.rmtree(workspace_dir, ignore_errors=True)
 
@@ -293,7 +303,7 @@ def run_scan(req: ScanRequest, db: Session = Depends(get_db)):
 
 
 @app.get("/api/scans")
-def get_scan_history(db: Session = Depends(get_db)):
+def get_scan_history(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     """Return all past scan results, newest first."""
     scans = db.query(models.ScanResult).order_by(models.ScanResult.id.desc()).limit(50).all()
     return [_scan_to_dict(s) for s in scans]
@@ -302,7 +312,7 @@ def get_scan_history(db: Session = Depends(get_db)):
 # ── Patch Approval (GitHub PR) ───────────────────────────────────────────────
 
 @app.post("/api/scans/{scan_id}/apply-patch")
-def apply_patch_pr(scan_id: int, db: Session = Depends(get_db)):
+def apply_patch_pr(scan_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     """
     Creates a GitHub Pull Request applying the AI-generated patch.
     Uses GITHUB_TOKEN from .env to authenticate.
@@ -424,7 +434,7 @@ def apply_patch_pr(scan_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/api/scans/{scan_id}/reject-patch")
-def reject_patch(scan_id: int, db: Session = Depends(get_db)):
+def reject_patch(scan_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     scan = db.query(models.ScanResult).filter(models.ScanResult.id == scan_id).first()
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
@@ -436,17 +446,17 @@ def reject_patch(scan_id: int, db: Session = Depends(get_db)):
 # ── Gates ────────────────────────────────────────────────────────────────────
 
 @app.get("/api/gates")
-def get_gates(db: Session = Depends(get_db)):
+def get_gates(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     return [_gate_to_dict(g) for g in db.query(models.Gate).all()]
 
 class GateCreate(BaseModel):
     name: str
     desc: str
-    strictness: str
-    action: str
+    strictness: list[str]  # M2: Pass lists to avoid json mismatch
+    action: list[str]
 
 @app.post("/api/gates")
-def create_gate(gate_in: GateCreate, db: Session = Depends(get_db)):
+def create_gate(gate_in: GateCreate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     gate_id = gate_in.name.lower().replace(" ", "_").replace("-", "_") + f"_{db.query(models.Gate).count()}"
     new_gate = models.Gate(
         id=gate_id,
@@ -463,7 +473,7 @@ def create_gate(gate_in: GateCreate, db: Session = Depends(get_db)):
 
 
 @app.post("/api/gates/{gate_id}/toggle")
-def toggle_gate(gate_id: str, db: Session = Depends(get_db)):
+def toggle_gate(gate_id: str, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     gate = db.query(models.Gate).filter(models.Gate.id == gate_id).first()
     if not gate:
         raise HTTPException(status_code=404, detail="Gate not found")
@@ -476,12 +486,12 @@ def toggle_gate(gate_id: str, db: Session = Depends(get_db)):
 # ── Agents ───────────────────────────────────────────────────────────────────
 
 @app.get("/api/agents")
-def get_agents(db: Session = Depends(get_db)):
+def get_agents(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     return [_agent_to_dict(a) for a in db.query(models.Agent).all()]
 
 
 @app.post("/api/agents/{agent_id}/toggle")
-def toggle_agent(agent_id: str, db: Session = Depends(get_db)):
+def toggle_agent(agent_id: str, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     agent = db.query(models.Agent).filter(models.Agent.id == agent_id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -495,7 +505,7 @@ def toggle_agent(agent_id: str, db: Session = Depends(get_db)):
 # ── Deployments ──────────────────────────────────────────────────────────────
 
 @app.get("/api/deployments")
-def get_deployments(db: Session = Depends(get_db)):
+def get_deployments(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     """
     Derive deployments dynamically from the 10 most recent scan results.
     Each scan = one deployment entry with a real status and security gate verdict.
@@ -545,7 +555,7 @@ _settings = {
 
 
 @app.get("/api/settings")
-def get_settings(db: Session = Depends(get_db)):
+def get_settings(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     # Populate team from real users table
     users = db.query(models.User).all()
     team  = [{"name": u.full_name or u.email, "email": u.email, "role": u.role} for u in users]
@@ -553,7 +563,7 @@ def get_settings(db: Session = Depends(get_db)):
 
 
 @app.post("/api/settings")
-def update_settings(s: SettingsUpdate):
+def update_settings(s: SettingsUpdate, current_user: models.User = Depends(get_current_user)):
     _settings["workspace"] = s.workspace
     _settings["timezone"]  = s.timezone
     return {"status": "success"}

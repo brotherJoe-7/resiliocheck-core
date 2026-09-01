@@ -1,4 +1,5 @@
 'use client';
+import { fetchApi } from '../../utils/apiClient';
 import { useState, useEffect } from 'react';
 import Sidebar from '../../components/Sidebar';
 
@@ -7,7 +8,7 @@ export default function AgentsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('http://localhost:8000/api/agents')
+    fetchApi('/api/agents')
       .then(res => res.json())
       .then(data => { setAgents(data); setLoading(false); })
       .catch(err => console.error(err));
@@ -19,7 +20,7 @@ export default function AgentsPage() {
     
     // Server sync
     try {
-      await fetch(`http://localhost:8000/api/agents/${id}/toggle`, { method: 'POST' });
+      await fetchApi(`/api/agents/${id}/toggle`, { method: 'POST' });
     } catch (err) {
       console.error(err);
     }

@@ -4,16 +4,17 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
-from passlib.context import CryptContext
+import bcrypt
 from pydantic import BaseModel, EmailStr
 from backend.database import get_db
 from backend.models import User
 
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "resiliocheck-super-secret-key-change-in-prod")
+SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("JWT_SECRET_KEY is required in production environment.")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 24
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer_scheme = HTTPBearer()
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -21,10 +22,10 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    return bcrypt.checkpw(plain.encode(), hashed.encode())
 
 def create_access_token(data: dict) -> str:
     payload = data.copy()
@@ -61,7 +62,7 @@ def require_admin(current_user: User = Depends(get_current_user)) -> User:
 # ── Schemas ──────────────────────────────────────────────────────────────────
 
 class RegisterRequest(BaseModel):
-    email: str
+    email: EmailStr
     password: str
     full_name: str = ""
 

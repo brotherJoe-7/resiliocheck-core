@@ -1,0 +1,17 @@
+FROM python:3.11-slim
+
+# Install system dependencies & Node.js 22
+RUN apt-get update && apt-get install -y curl ca-certificates && \
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y nodejs && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install static analysis tools globally
+RUN pip install --no-cache-dir bandit pip-audit semgrep
+RUN npm install -g semgrep
+
+# Add a non-root user
+RUN useradd -m sandboxuser
+USER sandboxuser
+
+WORKDIR /workspace

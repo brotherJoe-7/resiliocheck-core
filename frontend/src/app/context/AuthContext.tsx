@@ -1,4 +1,5 @@
 'use client';
+import { fetchApi } from '../../utils/apiClient';
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 
 interface AuthUser {
@@ -34,7 +35,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   async function login(email: string, password: string) {
-    const res = await fetch('http://localhost:8000/api/auth/login', {
+    const res = await fetchApi('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
@@ -52,7 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function register(email: string, password: string, full_name: string) {
-    const res = await fetch('http://localhost:8000/api/auth/register', {
+    const res = await fetchApi('/api/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password, full_name }),

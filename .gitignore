@@ -45,3 +45,5 @@ Thumbs.db
 *.json
 tmp_workspace/
 tmp_workspace_*/
+
+resiliocheck.db

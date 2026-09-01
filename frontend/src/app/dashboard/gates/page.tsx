@@ -1,4 +1,5 @@
 'use client';
+import { fetchApi } from '../../utils/apiClient';
 import { useState, useEffect } from 'react';
 import Sidebar from '../../components/Sidebar';
 import { Circle } from 'lucide-react';
@@ -13,13 +14,13 @@ export default function GatesPage() {
   const [newGate, setNewGate] = useState({ name: '', desc: '', strictness: 'Standard', action: 'Alert Only' });
 
   useEffect(() => {
-    fetch('http://localhost:8000/api/gates')
+    fetchApi('/api/gates')
       .then(res => res.json())
       .then(data => { setGates(data); setLoading(false); })
       .catch(err => console.error(err));
 
     // Load scan history to compute real block/pass counts
-    fetch('http://localhost:8000/api/scans')
+    fetchApi('/api/scans')
       .then(res => res.json())
       .then((scans: any[]) => {
         const blocked = scans.filter(s => s.gate === 'BLOCKED').length;
@@ -31,7 +32,7 @@ export default function GatesPage() {
   async function toggle(id: string) {
     setGates(g => g.map(gate => gate.id === id ? { ...gate, active: !gate.active, status: !gate.active ? 'ACTIVE' : 'INACTIVE', statusCls: !gate.active ? 'rc-pill-green' : 'rc-pill-gray' } : gate));
     try {
-      await fetch(`http://localhost:8000/api/gates/${id}/toggle`, { method: 'POST' });
+      await fetchApi(`/api/gates/${id}/toggle`, { method: 'POST' });
     } catch (err) {
       console.error(err);
     }
@@ -40,7 +41,7 @@ export default function GatesPage() {
   async function handleCreateGate(e: React.FormEvent) {
     e.preventDefault();
     try {
-      const res = await fetch('http://localhost:8000/api/gates', {
+      const res = await fetchApi('/api/gates', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newGate)
@@ -192,4 +193,3 @@ export default function GatesPage() {
     </div>
   );
 }
-

@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+pydantic
+pyjwt
+passlib[bcrypt]
+requests
+docker
+python-dotenv
+langchain
+langchain-groq
+email-validator

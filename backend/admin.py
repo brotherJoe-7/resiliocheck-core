@@ -44,6 +44,9 @@ def update_user_role(user_id: int, role: str, db: Session = Depends(get_db), cur
     if not user:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="User not found")
+    if user.id == current.id:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Cannot change your own role")
     user.role = role
     db.commit()
     return {"status": "success", "user_id": user_id, "new_role": role}
@@ -54,6 +57,9 @@ def deactivate_user(user_id: int, db: Session = Depends(get_db), current: User =
     if not user:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="User not found")
+    if user.id == current.id:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Cannot deactivate your own account")
     user.is_active = False
     db.commit()
     return {"status": "deactivated", "user_id": user_id}

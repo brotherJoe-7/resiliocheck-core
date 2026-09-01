@@ -1,4 +1,5 @@
 'use client';
+import { fetchApi } from '../../utils/apiClient';
 import { useState, useEffect } from 'react';
 import Sidebar from '../../components/Sidebar';
 import { Check } from 'lucide-react';
@@ -10,7 +11,7 @@ export default function DeploymentsPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   useEffect(() => {
-    fetch('http://localhost:8000/api/deployments')
+    fetchApi('/api/deployments')
       .then(res => res.json())
       .then(data => { setDeployments(data); setLoading(false); })
       .catch(err => console.error(err));

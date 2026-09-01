@@ -1,4 +1,5 @@
 'use client';
+import { fetchApi } from '../../utils/apiClient';
 import { useState, useEffect } from 'react';
 import Sidebar from '../../components/Sidebar';
 
@@ -11,7 +12,7 @@ export default function SettingsPage() {
   const [message, setMessage] = useState('');
 
   useEffect(() => {
-    fetch('http://localhost:8000/api/settings')
+    fetchApi('/api/settings')
       .then(res => res.json())
       .then(data => {
         setSettings(data);
@@ -26,7 +27,7 @@ export default function SettingsPage() {
     setSaving(true);
     setMessage('');
     try {
-      await fetch('http://localhost:8000/api/settings', {
+      await fetchApi('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workspace, timezone })
