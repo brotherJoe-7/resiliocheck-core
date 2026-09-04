@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Check } from 'lucide-react';
+import Navbar from '../components/Navbar';
 
 
 const sections = [
@@ -14,10 +15,9 @@ const sections = [
 export default function DocumentationPage() {
   return (
     <div style={{ minHeight: '100vh', background: '#09090b', color: '#fafafa', fontFamily: 'Inter, sans-serif' }}>
-      <nav style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 48px', borderBottom: '1px solid #18181b', position: 'sticky', top: 0, background: '#09090b', zIndex: 10 }}>
-        <Link href="/" style={{ fontWeight: 800, fontSize: '1rem', color: '#ea580c', textDecoration: 'none' }}>ResilioCheck AI</Link>
-        <Link href="/dashboard" style={{ background: '#ea580c', color: '#fff', borderRadius: 6, padding: '8px 18px', textDecoration: 'none', fontWeight: 600, fontSize: '0.85rem' }}>Open Dashboard →</Link>
-      </nav>
+      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: '#09090b' }}>
+        <Navbar activeItem="Documentation" />
+      </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', maxWidth: 1100, margin: '0 auto', padding: '0 24px' }}>
         {/* Sidebar */}

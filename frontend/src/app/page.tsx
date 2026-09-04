@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Check } from 'lucide-react';
+import Navbar from './components/Navbar';
 
 
 const PLANS = [
@@ -26,19 +27,7 @@ const PLANS = [
 export default function LandingPage() {
   return (
     <div style={{ minHeight: '100vh', background: '#09090b', display: 'flex', flexDirection: 'column' }}>
-      {/* Nav */}
-      <nav style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 48px', height: 60, borderBottom: '1px solid #27272a' }}>
-        <div style={{ fontWeight: 800, fontSize: '1rem', color: '#ea580c' }}>ResilioCheck AI</div>
-        <div style={{ display: 'flex', gap: 32, fontSize: '0.85rem', color: '#a1a1aa' }}>
-          {['Platform', 'Solutions', 'Documentation', 'Pricing'].map(item => (
-            <Link key={item} href={item === 'Pricing' ? '/' : `/${item.toLowerCase()}`} style={{ color: item === 'Pricing' ? '#ea580c' : '#a1a1aa', textDecoration: item === 'Pricing' ? 'underline' : 'none', textUnderlineOffset: 4, cursor: 'pointer', transition: 'color 0.15s' }}>{item}</Link>
-          ))}
-        </div>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-          <Link href="/dashboard" style={{ fontSize: '0.82rem', color: '#a1a1aa', textDecoration: 'none' }}>Console Login</Link>
-          <Link href="/dashboard" style={{ background: 'linear-gradient(180deg,#f97316,#ea580c)', color: 'white', border: 'none', borderRadius: 6, padding: '8px 18px', fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer', textDecoration: 'none' }}>Request Access</Link>
-        </div>
-      </nav>
+      <Navbar activeItem="Pricing" />
 
       {/* Pricing Hero */}
       <div style={{ flex: 1, padding: '80px 48px' }}>
@@ -76,7 +65,7 @@ export default function LandingPage() {
                   </div>
                 ))}
               </div>
-              <Link href="/dashboard" style={{ display: 'flex', justifyContent: 'center', padding: '11px 20px', borderRadius: 6, fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer', textDecoration: 'none', background: plan.ctaPrimary ? 'linear-gradient(180deg,#f97316,#ea580c)' : 'transparent', color: plan.ctaPrimary ? 'white' : '#fafafa', border: plan.ctaPrimary ? 'none' : '1px solid #27272a', transition: 'all 0.15s' }}>
+              <Link href="/register" style={{ display: 'flex', justifyContent: 'center', padding: '11px 20px', borderRadius: 6, fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer', textDecoration: 'none', background: plan.ctaPrimary ? '#ea580c' : 'transparent', color: plan.ctaPrimary ? 'white' : '#fafafa', border: plan.ctaPrimary ? 'none' : '1px solid #27272a', transition: 'opacity 0.15s' }}>
                 {plan.cta}
               </Link>
             </div>

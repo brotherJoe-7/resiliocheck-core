@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Check, Rocket, Globe, Building2 } from 'lucide-react';
+import Navbar from '../components/Navbar';
 import type { LucideIcon } from 'lucide-react';
 
 const solutions: { tag: string; Icon: LucideIcon; headline: string; desc: string; points: string[] }[] = [
@@ -26,10 +27,7 @@ const solutions: { tag: string; Icon: LucideIcon; headline: string; desc: string
 export default function SolutionsPage() {
   return (
     <div style={{ minHeight: '100vh', background: '#09090b', color: '#fafafa', fontFamily: 'Inter, sans-serif' }}>
-      <nav style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 48px', borderBottom: '1px solid #18181b' }}>
-        <Link href="/" style={{ fontWeight: 800, fontSize: '1rem', color: '#ea580c', textDecoration: 'none' }}>ResilioCheck AI</Link>
-        <Link href="/login" style={{ background: '#ea580c', color: '#fff', borderRadius: 6, padding: '8px 18px', textDecoration: 'none', fontWeight: 600, fontSize: '0.85rem' }}>Get Started →</Link>
-      </nav>
+      <Navbar activeItem="Solutions" />
 
       <div style={{ maxWidth: 900, margin: '0 auto', padding: '80px 24px' }}>
         <div style={{ textAlign: 'center', marginBottom: 72 }}>
@@ -68,7 +66,7 @@ export default function SolutionsPage() {
         </div>
 
         <div style={{ textAlign: 'center', marginTop: 72 }}>
-          <Link href="/" style={{ background: 'linear-gradient(135deg, #ea580c, #dc2626)', color: '#fff', borderRadius: 8, padding: '14px 32px', textDecoration: 'none', fontWeight: 700, fontSize: '1rem' }}>
+          <Link href="/" style={{ background: '#ea580c', color: '#fff', borderRadius: 8, padding: '14px 32px', textDecoration: 'none', fontWeight: 700, fontSize: '1rem' }}>
             See Pricing →
           </Link>
         </div>

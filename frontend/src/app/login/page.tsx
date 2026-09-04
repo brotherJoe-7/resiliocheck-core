@@ -30,14 +30,13 @@ export default function LoginPage() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#09090b', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-      {/* Background glow */}
-      <div style={{ position: 'fixed', top: '20%', left: '50%', transform: 'translateX(-50%)', width: 500, height: 300, background: 'radial-gradient(ellipse, rgba(234,88,12,0.12) 0%, transparent 70%)', pointerEvents: 'none' }} />
+      {/* Background glow removed for flat design */}
       
       <div style={{ width: '100%', maxWidth: 420, position: 'relative', zIndex: 1 }}>
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 40 }}>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-            <div style={{ width: 32, height: 32, background: 'linear-gradient(135deg, #ea580c, #dc2626)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1rem' }}><Zap size={16} /></div>
+            <div style={{ width: 32, height: 32, background: '#ea580c', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1rem' }}><Zap size={16} /></div>
             <span style={{ fontSize: '1.3rem', fontWeight: 800, color: '#fafafa', letterSpacing: '-0.02em' }}>ResilioCheck AI</span>
           </div>
           <div style={{ fontSize: '0.85rem', color: '#71717a' }}>Sign in to your workspace</div>

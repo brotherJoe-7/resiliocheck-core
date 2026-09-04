@@ -95,7 +95,7 @@ export default function SettingsPage() {
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-              <div className="rc-card" style={{ border: '1px solid var(--accent)', background: 'linear-gradient(180deg, rgba(234,88,12,0.05) 0%, rgba(0,0,0,0) 100%)' }}>
+              <div className="rc-card" style={{ border: '1px solid var(--accent)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                   <div style={{ fontSize: '1.1rem', fontWeight: 700 }}>{settings.plan.name}</div>
                   <div className="rc-pill rc-pill-orange">{settings.plan.status}</div>

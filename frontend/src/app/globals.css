@@ -88,7 +88,7 @@
   
   /* Primary button */
   .rc-btn-primary {
-    background: linear-gradient(180deg, #f97316, #ea580c);
+    background: #ea580c;
     color: white; border: none; border-radius: 6px;
     padding: 9px 18px; font-size: 0.82rem; font-weight: 700;
     cursor: pointer; display: inline-flex; align-items: center; gap: 6px;

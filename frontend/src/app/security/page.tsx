@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Check, Lock } from 'lucide-react';
+import Navbar from '../components/Navbar';
 
 
 const sections = [
@@ -13,10 +14,7 @@ const sections = [
 export default function SecurityPage() {
   return (
     <div style={{ minHeight: '100vh', background: '#09090b', color: '#fafafa', fontFamily: 'Inter, sans-serif' }}>
-      <nav style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 48px', borderBottom: '1px solid #18181b' }}>
-        <Link href="/" style={{ fontWeight: 800, fontSize: '1rem', color: '#ea580c', textDecoration: 'none' }}>ResilioCheck AI</Link>
-        <Link href="/login" style={{ background: '#ea580c', color: '#fff', borderRadius: 6, padding: '8px 18px', textDecoration: 'none', fontWeight: 600, fontSize: '0.85rem' }}>Dashboard →</Link>
-      </nav>
+      <Navbar />
       <div style={{ maxWidth: 760, margin: '0 auto', padding: '64px 24px 80px' }}>
         <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#52525b', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 12 }}>Security</div>
         <h1 style={{ fontSize: '2.2rem', fontWeight: 800, marginBottom: 8 }}>Security Disclosure</h1>
