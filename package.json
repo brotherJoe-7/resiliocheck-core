@@ -1,0 +1,13 @@
+{
+  "name": "resiliocheck-vercel-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "vercel-build": "cd frontend && npm install && npm run build"
+  },
+  "dependencies": {
+    "next": "latest",
+    "react": "latest",
+    "react-dom": "latest"
+  }
+}
