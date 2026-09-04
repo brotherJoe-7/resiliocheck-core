@@ -1,5 +1,5 @@
 'use client';
-import { fetchApi } from '../../utils/apiClient';
+import { fetchApi } from '@/app/utils/apiClient';
 import { useState, useEffect, useCallback } from 'react';
 import Sidebar from '../components/Sidebar';
 import { Zap, Check, AlertTriangle, Hourglass, LayoutGrid, X, CheckCircle2 } from 'lucide-react';

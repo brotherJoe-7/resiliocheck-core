@@ -1,5 +1,5 @@
 'use client';
-import { fetchApi } from '../../utils/apiClient';
+import { fetchApi } from '@/app/utils/apiClient';
 import { useState, useEffect } from 'react';
 import Sidebar from '../../components/Sidebar';
 

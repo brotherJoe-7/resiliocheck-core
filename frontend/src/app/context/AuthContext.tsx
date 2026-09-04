@@ -1,5 +1,5 @@
 'use client';
-import { fetchApi } from '../../utils/apiClient';
+import { fetchApi } from '@/app/utils/apiClient';
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 
 interface AuthUser {
