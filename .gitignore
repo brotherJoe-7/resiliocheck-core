@@ -42,7 +42,7 @@ htmlcov/
 # ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
-*.json
+*-*.json
 tmp_workspace/
 tmp_workspace_*/
 
