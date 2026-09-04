@@ -222,6 +222,7 @@ async def run_scan(req: ScanRequest, db: Session = Depends(get_db), current_user
 
         # H4: Run expensive static analysis / network requests in threadpool
         def _run_scan_blocking():
+            from backend.langchain_pipeline import run_patch_retry_agent
             download_and_extract_repo(req.repo_url, workspace_dir)
             srcs = gather_source_files(workspace_dir)
             if not srcs:
@@ -231,8 +232,19 @@ async def run_scan(req: ScanRequest, db: Session = Depends(get_db), current_user
             verdict = "SKIPPED"
             p_code = pipe_res.get("patched_code", "")
             p_file = pipe_res.get("patched_filename", "patched_script.js")
+            
             if p_code:
-                verdict = apply_patch_and_validate(workspace_dir, p_code, p_file)
+                max_retries = 2
+                for attempt in range(max_retries + 1):
+                    verdict, logs = apply_patch_and_validate(workspace_dir, p_code, p_file)
+                    if verdict == "PASS" or attempt == max_retries:
+                        break
+                    
+                    # If it failed, retry patching
+                    print(f"Patch failed validation (Attempt {attempt+1}/{max_retries}). Retrying with AI...")
+                    p_code = run_patch_retry_agent(pipe_res, srcs, p_code, logs)
+                    pipe_res["patched_code"] = p_code
+                    
             return srcs, secrets, pipe_res, verdict
 
         source_files, secret_findings, pipeline_result, sandbox_verdict = await run_in_threadpool(_run_scan_blocking)

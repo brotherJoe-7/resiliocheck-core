@@ -479,7 +479,7 @@ def apply_patch_and_validate(workspace_dir, patched_code, patched_filename="patc
     """
     if not (patched_code and patched_code.strip()):
         print("No patched code generated — skipping sandbox.")
-        return "SKIPPED"
+        return "SKIPPED", ""
 
     # C2: Sanitize patched_filename to prevent command injection / path traversal
     if not re.match(r"^[A-Za-z0-9._\-]+$", patched_filename):
@@ -598,17 +598,17 @@ def apply_patch_and_validate(workspace_dir, patched_code, patched_filename="patc
 
         if syntax_ok and not has_critical:
             print("Sandbox Validation: PASS")
-            return "PASS"
+            return "PASS", logs
         elif not syntax_ok:
             print("Sandbox Validation: FAIL (syntax error in patched code)")
-            return "FAIL"
+            return "FAIL", logs
         else:
             print("Sandbox Validation: FAIL (critical/high severity findings)")
-            return "FAIL"
+            return "FAIL", logs
 
     except Exception as e:
         print(f"ERROR: Docker sandbox failed: {str(e)}")
-        return "ERROR"
+        return "ERROR", str(e)
     finally:
         if container is not None:
             try:

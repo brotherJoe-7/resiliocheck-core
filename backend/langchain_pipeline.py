@@ -218,6 +218,48 @@ def run_patch_agent(owasp_result: dict, source_files: dict) -> tuple[str, str]:
     return patched, os.path.basename(target_file)
 
 
+def run_patch_retry_agent(owasp_result: dict, source_files: dict, failed_patch: str, error_logs: str) -> str:
+    """
+    Step 3.5: Patch Retry Generator.
+    Called when the Sandbox Validation fails. Asks the AI to fix its patch using the compiler/SAST error logs.
+    """
+    findings = owasp_result.get("findings", [])
+    if not findings:
+        return failed_patch
+        
+    severity_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+    findings_sorted = sorted(findings, key=lambda f: severity_order.get(f.get("severity", "INFO"), 4))
+    worst = findings_sorted[0]
+    
+    print(f"[Pipeline] Step 3.5: Patch Retry Agent — attempting to fix previous patch for {worst.get('severity')} issue")
+    
+    # Truncate error logs if they are too long (last 1500 chars are usually the most relevant for stack traces)
+    trimmed_logs = error_logs[-1500:] if len(error_logs) > 1500 else error_logs
+
+    patch_system = (
+        "You are a secure code patch generator. Your previous patch failed validation in our Docker sandbox. "
+        "You will receive the original vulnerability, your failed patch, and the sandbox error logs (syntax error or SAST finding). "
+        "Generate a NEW, corrected patch that fixes the vulnerability AND resolves the sandbox error. "
+        "Return ONLY the corrected code as a plain string — no markdown, no explanation, no JSON."
+    )
+    user_msg = (
+        f"VULNERABILITY:\n"
+        f"  File: {worst.get('file_path')}\n"
+        f"  OWASP: {worst.get('owasp_class')}\n"
+        f"  Severity: {worst.get('severity')}\n"
+        f"  Description: {worst.get('description')}\n"
+        f"  Remediation: {worst.get('remediation')}\n\n"
+        f"YOUR FAILED PATCH:\n{failed_patch}\n\n"
+        f"SANDBOX ERROR LOGS:\n{trimmed_logs}\n\n"
+        f"Generate the NEW patched version of the code:"
+    )
+
+    patched = _call_groq(patch_system, user_msg, temperature=0.2)
+    patched = re.sub(r"```\w*\s*", "", patched).strip().rstrip("`").strip()
+    print(f"[Pipeline] Patch Retry Agent generated {len(patched)} chars of patched code.")
+    return patched
+
+
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
