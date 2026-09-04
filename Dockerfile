@@ -22,8 +22,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the backend code
+# Copy the backend and config code
 COPY backend/ ./backend/
+COPY config/ ./config/
 
 # Expose the port the app runs on
 EXPOSE 8000
