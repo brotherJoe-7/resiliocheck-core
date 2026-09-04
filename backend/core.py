@@ -259,6 +259,75 @@ def scan_for_secrets(source_files):
     return findings
 
 
+def run_local_sast_prefilter(workspace_dir: str) -> set:
+    """
+    Runs fast, local SAST tools (semgrep, bandit) over the entire codebase to flag
+    suspicious files. Returns a set of relative file paths that have findings.
+    This acts as a high-precision filter so we only send relevant files to the LLM.
+    """
+    flagged_files = set()
+    print("Running local SAST prefilter on entire workspace...")
+    
+    try:
+        client = docker.from_env()
+        abs_workspace = os.path.abspath(workspace_dir)
+        image = "resiliocheck-sandbox:latest"
+
+        command = [
+            "sh", "-c",
+            "bandit -r /workspace -f json -ll -q --exclude /workspace/node_modules 2>/dev/null > /tmp/bandit.json; "
+            "semgrep --config=p/default /workspace --json --quiet 2>/dev/null > /tmp/semgrep.json; "
+            "cat /tmp/bandit.json; echo '---SEMGREP_START---'; cat /tmp/semgrep.json"
+        ]
+
+        logs_bytes = client.containers.run(
+            image,
+            command=command,
+            volumes={abs_workspace: {"bind": "/workspace", "mode": "ro"}},
+            network_disabled=True,
+            read_only=True,
+            cap_drop=["ALL"],
+            security_opt=["no-new-privileges:true"],
+            mem_limit="1024m",
+            detach=False,
+            remove=True,
+            tmpfs={'/tmp': '', '/run': ''}
+        )
+
+        logs = logs_bytes.decode("utf-8", errors="replace")
+        
+        # Parse bandit
+        try:
+            bandit_json = logs.split("---SEMGREP_START---")[0]
+            if bandit_json.strip() and bandit_json.strip().startswith("{"):
+                data = json.loads(bandit_json)
+                for r in data.get("results", []):
+                    filename = r.get("filename", "")
+                    if filename.startswith("/workspace/"):
+                        flagged_files.add(filename.replace("/workspace/", ""))
+        except Exception as e:
+            print(f"Error parsing bandit prefilter: {e}")
+
+        # Parse semgrep
+        try:
+            if "---SEMGREP_START---" in logs:
+                semgrep_json = logs.split("---SEMGREP_START---")[1]
+                if semgrep_json.strip() and semgrep_json.strip().startswith("{"):
+                    data = json.loads(semgrep_json)
+                    for r in data.get("results", []):
+                        path = r.get("path", "")
+                        if path.startswith("/workspace/"):
+                            flagged_files.add(path.replace("/workspace/", ""))
+        except Exception as e:
+            print(f"Error parsing semgrep prefilter: {e}")
+
+    except Exception as e:
+        print(f"Local SAST prefilter failed: {e}")
+        
+    print(f"Local SAST prefilter flagged {len(flagged_files)} files.")
+    return flagged_files
+
+
 def run_ai_analysis(source_files, secret_findings=None):
     """
     Sends collected source files to the Groq LLM for deep security analysis.

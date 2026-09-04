@@ -14,6 +14,7 @@ from backend.core import (
     gather_source_files,
     scan_for_secrets,
     apply_patch_and_validate,
+    run_local_sast_prefilter,
 )
 from backend.langchain_pipeline import run_pipeline
 from backend.database import engine, get_db
@@ -228,7 +229,29 @@ async def run_scan(req: ScanRequest, db: Session = Depends(get_db), current_user
             if not srcs:
                 return None, None, None, None
             secrets = scan_for_secrets(srcs)
-            pipe_res = run_pipeline(srcs, secrets)
+            
+            # --- HYBRID SAST PREFILTER ---
+            # Run local SAST over the entire extracted repo
+            flagged_files = run_local_sast_prefilter(workspace_dir)
+            
+            # Filter the source files to only those that were flagged (or have secrets)
+            # If nothing was flagged natively, we still pass a few priority files to AI just in case.
+            filtered_srcs = {}
+            for path, content in srcs.items():
+                rel_path = os.path.relpath(path, workspace_dir).replace("\\", "/")
+                # Also include files with secret findings
+                has_secret = any(f['file'] == os.path.basename(path) for f in secrets)
+                if rel_path in flagged_files or has_secret:
+                    filtered_srcs[path] = content
+                    
+            # If the prefilter found nothing, provide the top 3 highest-scored files as a fallback
+            if not filtered_srcs:
+                print("Prefilter returned 0 files. Falling back to top 3 generic files.")
+                filtered_srcs = {k: srcs[k] for k in list(srcs.keys())[:3]}
+            
+            print(f"Passing {len(filtered_srcs)} files to LLM AI pipeline.")
+            
+            pipe_res = run_pipeline(filtered_srcs, secrets)
             verdict = "SKIPPED"
             p_code = pipe_res.get("patched_code", "")
             p_file = pipe_res.get("patched_filename", "patched_script.js")

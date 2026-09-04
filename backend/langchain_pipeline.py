@@ -35,12 +35,14 @@ GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
 
 # ---------------------------------------------------------------------------
 # Internal helpers
-# ---------------------------------------------------------------------------
+from tenacity import retry, stop_after_attempt, wait_exponential
 
+@retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=2, max=10))
 def _call_groq(system: str, user: str, temperature: float = 0.0) -> str:
     """
     Single Groq API call. Returns the raw text content from the model.
-    Raises RuntimeError on API failure.
+    Retries automatically with exponential backoff on 429 errors.
+    Raises RuntimeError on API failure after retries.
     """
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
