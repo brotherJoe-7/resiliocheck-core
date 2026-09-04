@@ -96,13 +96,13 @@ def run_owasp_agent(source_files: dict, secret_findings: list) -> dict:
     """
     print("[Pipeline] Step 1: OWASP Agent — classifying vulnerabilities...")
 
-    # Build a compact source code context (max ~4000 chars total to stay under TPM)
-    MAX_CHARS  = 4_000
+    # Build a compact source code context
+    MAX_CHARS  = 25_000
     code_parts = []
     used       = 0
     for filepath, content in source_files.items():
         fname   = os.path.basename(filepath)
-        snippet = content[:400]          # max 400 chars per file
+        snippet = content[:1500]          # max 1500 chars per file
         entry   = f"=== {fname} ===\n{snippet}\n"
         if used + len(entry) > MAX_CHARS:
             break
@@ -192,7 +192,7 @@ def run_patch_agent(owasp_result: dict, source_files: dict) -> tuple[str, str]:
     file_content = ""
     for fp, content in source_files.items():
         if os.path.basename(fp) == os.path.basename(target_file):
-            file_content = content[:800]
+            file_content = content[:3000]
             break
 
     patch_system = (
