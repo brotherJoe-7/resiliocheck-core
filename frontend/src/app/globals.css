@@ -87,6 +87,21 @@
   /* Main content area */
   .rc-main { margin-left: var(--sidebar-w); min-height: 100vh; padding: 40px 48px; }
   
+  /* Mobile topbar — hidden by default on desktop */
+  .rc-mobile-topbar {
+    display: none;
+    position: sticky; top: 0; z-index: 48;
+    background: #0c0c0f;
+    border-bottom: 1px solid var(--border);
+    padding: 0 20px; height: 52px;
+    align-items: center; justify-content: space-between;
+  }
+  .rc-mobile-topbar-btn {
+    background: none; border: none; cursor: pointer;
+    color: #a1a1aa; display: flex; align-items: center; gap: 6px;
+    font-size: 0.82rem; font-family: inherit;
+  }
+  
   /* Page header */
   .rc-page-hdr { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 32px; }
   .rc-page-title { font-size: 1.75rem; font-weight: 800; color: var(--text-primary); letter-spacing: -0.5px; }

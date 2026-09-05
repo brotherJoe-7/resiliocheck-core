@@ -156,7 +156,7 @@ export default function DashboardPage() {
         </div>
 
         {/* KPI Metrics */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 32 }}>
+        <div className="rc-grid-4" style={{ marginBottom: 32 }}>
           {[
             { label: 'Critical Vulns',  value: criticalVulns,    delta: criticalVulns === 0 ? '−100% (Clean)' : `+${criticalVulns} Active Issues`, up: criticalVulns === 0 },
             { label: 'System Health',   value: '99.9%',          delta: '+0.2% (Optimized)', up: true },
@@ -172,7 +172,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Main 2-Col */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 20, marginBottom: 24 }}>
+        <div className="rc-grid-2" style={{ marginBottom: 24 }}>
           {/* Scan Config */}
           <div className="rc-card">
             <div className="rc-card-hdr">
@@ -182,7 +182,7 @@ export default function DashboardPage() {
               <label className="rc-label">Repository URL Target</label>
               <input className="rc-input" value={repoUrl} onChange={e => setRepoUrl(e.target.value)} placeholder="https://github.com/owner/repo" />
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
               <div>
                 <label className="rc-label">Branch Target</label>
                 <select className="rc-select" value={branch} onChange={e => setBranch(e.target.value)}>
@@ -252,6 +252,7 @@ export default function DashboardPage() {
                 <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px', color: 'var(--text-muted)', marginBottom: 10 }}>
                   OWASP FINDINGS — {scanResult.findings.length} issue(s) — {scanResult.critical_count} critical, {scanResult.high_count} high
                 </div>
+                <div className="rc-table-wrap">
                 <table className="rc-table">
                   <thead>
                     <tr>
@@ -274,6 +275,7 @@ export default function DashboardPage() {
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
             )}
 
