@@ -47,8 +47,7 @@ export default function RegisterPage() {
         </div>
 
         <div style={{ background: '#111113', border: '1px solid #27272a', borderRadius: 16, padding: '36px 32px' }}>
-          <h1 style={{ fontSize: '1.4rem', fontWeight: 700, color: '#fafafa', marginBottom: 8, marginTop: 0 }}>Create account</h1>
-          <p style={{ fontSize: '0.82rem', color: '#71717a', marginTop: 0, marginBottom: 24 }}>The first account created will automatically become <span style={{ color: '#ea580c', fontWeight: 600 }}>Super Admin</span>.</p>
+          <h1 style={{ fontSize: '1.4rem', fontWeight: 700, color: '#fafafa', marginBottom: 24, marginTop: 0 }}>Create account</h1>
           
           <form onSubmit={handleSubmit}>
             <div style={{ marginBottom: 16 }}>

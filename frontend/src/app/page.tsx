@@ -74,7 +74,7 @@ export default function LandingPage() {
       </div>
 
       <footer style={{ borderTop: '1px solid #27272a', padding: '20px 20px', display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-        <div style={{ fontSize: '0.75rem', color: '#52525b' }}>© 2024 ResilioCheck AI. All rights reserved.</div>
+        <div style={{ fontSize: '0.75rem', color: '#52525b' }}>© 2026 ResilioCheck AI. All rights reserved.</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, fontSize: '0.75rem', color: '#52525b' }}>
           {[
             { label: 'Privacy Policy', path: '/privacy' },
