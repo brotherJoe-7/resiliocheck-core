@@ -65,7 +65,13 @@ The core engine of ResilioCheck. It downloads the source code into an isolated s
 - **Gate Decision Agent**: Enforces strict numeric policies (e.g. `BLOCKED` if Critical >= 1 or High >= 3) against the findings.
 - **Patch Generator & Sandbox**: Generates a targeted fix for the highest severity issue. The patched file is then written back to disk and syntax-validated inside a hardened Docker container, which dynamically supports multiple languages (`.js`, `.ts` via Node 22, `.py`, `.php`, `.rb`, `.sh`).
 
-### 2. Security Gates
+### 2. 🔄 Automated Pull Requests & Remediation Workflow
+When a vulnerability is detected and a patch is successfully generated in the sandbox, users can push the fix directly to GitHub.
+- **Concurrent Approvals**: Teams can review, approve, or reject patches directly from the **ResilioCheck Dashboard**. Approving a patch triggers the backend (`/api/scan/apply-patch`) to automatically create a new branch and open a Pull Request against the target repository.
+- **GitHub-Native Review**: Once the PR is opened, the fix can also be reviewed, modified, and merged natively on GitHub by repository maintainers.
+- **Current Mechanism**: Automated PRs are currently powered by a centralized bot token (`GITHUB_TOKEN` environment variable).
+
+### 3. Security Gates
 Security Gates act as automated checkpoints in your CI/CD pipeline. When enabled, they evaluate every pull request or commit.
 - **XSS Prevention Gate**: Blocks code that contains potential Cross-Site Scripting vulnerabilities.
 - **Dependency Audit Gate**: Stops deployments if critical CVEs are found in your `package.json` or `requirements.txt`.
@@ -83,3 +89,14 @@ These agents can be toggled on/off individually.
 
 ### 5. Organization Settings
 The administrative hub where you manage your workspace preferences, generate API keys for CLI/CI integrations, view your current Enterprise billing plan, and invite team members with role-based access control (RBAC).
+
+## 🔮 Future Work: Private Repositories & User Authorization (World Standard)
+
+To scale this to a "world standard" product that securely supports private repositories, the following architectural upgrades are on the roadmap:
+
+1. **GitHub App Integration (OAuth)**: 
+   Instead of using a single centralized bot token (`GITHUB_TOKEN`), users will click an **"Authorize with GitHub"** button upon signing in. This will implement the standard OAuth2 flow, requesting scoped permissions (e.g., `repo` access).
+2. **User-Delegated PRs**: 
+   When a user clicks "Approve Patch" on the dashboard, the backend will use *their specific OAuth token* to fork the repo (if necessary), create a branch, and open the Pull Request on their behalf.
+3. **Private Repository Scanning**: 
+   By authenticating the user via GitHub App, the backend will be able to clone and scan private repositories securely using the user's short-lived access tokens, ensuring zero unauthorized data leakage.
