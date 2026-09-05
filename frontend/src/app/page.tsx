@@ -115,6 +115,42 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* Under the Hood (Architecture) */}
+      <section style={{ padding: 'clamp(60px, 8vw, 100px) clamp(20px, 5vw, 48px)', background: '#09090b', borderBottom: '1px solid #27272a' }}>
+        <div style={{ maxWidth: 1100, margin: '0 auto' }}>
+          <div style={{ textAlign: 'center', marginBottom: 60 }}>
+            <h2 style={{ fontSize: '2.2rem', fontWeight: 800, color: '#fafafa', marginBottom: 16 }}>Powered by Multi-Agent AI</h2>
+            <p style={{ color: '#a1a1aa', fontSize: '1.1rem', maxWidth: 700, margin: '0 auto' }}>ResilioCheck AI uses a LangChain multi-agent architecture to autonomously classify, decide, and remediate code vulnerabilities natively.</p>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
+            <div style={{ display: 'flex', gap: 24, padding: 32, border: '1px solid #27272a', borderRadius: 12, background: 'linear-gradient(to right, rgba(234, 88, 12, 0.05), transparent)' }}>
+              <div style={{ flexShrink: 0, width: 48, height: 48, background: '#ea580c', borderRadius: '50%', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800 }}>A1</div>
+              <div>
+                <h4 style={{ color: '#ea580c', fontSize: '1.2rem', marginBottom: 8, fontWeight: 700 }}>OWASP Classification Agent</h4>
+                <p style={{ color: '#a1a1aa', fontSize: '0.95rem', lineHeight: 1.6 }}>Analyzes raw code against the latest OWASP Top 10 framework. It detects deep semantic vulnerabilities like SQL Injection, Broken Access Control, and Insecure Design that static scanners miss.</p>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 24, padding: 32, border: '1px solid #27272a', borderRadius: 12, background: 'linear-gradient(to right, rgba(16, 185, 129, 0.05), transparent)' }}>
+              <div style={{ flexShrink: 0, width: 48, height: 48, background: '#10b981', borderRadius: '50%', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800 }}>A2</div>
+              <div>
+                <h4 style={{ color: '#10b981', fontSize: '1.2rem', marginBottom: 8, fontWeight: 700 }}>Gate Decision Agent</h4>
+                <p style={{ color: '#a1a1aa', fontSize: '0.95rem', lineHeight: 1.6 }}>Enforces strict numeric policies dynamically. If a PR contains >= 1 Critical or >= 3 High vulnerabilities, this agent automatically triggers a `BLOCKED` state in your CI/CD pipeline.</p>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 24, padding: 32, border: '1px solid #27272a', borderRadius: 12, background: 'linear-gradient(to right, rgba(168, 85, 247, 0.05), transparent)' }}>
+              <div style={{ flexShrink: 0, width: 48, height: 48, background: '#a855f7', borderRadius: '50%', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800 }}>A3</div>
+              <div>
+                <h4 style={{ color: '#a855f7', fontSize: '1.2rem', marginBottom: 8, fontWeight: 700 }}>Patch Generator & Sandbox</h4>
+                <p style={{ color: '#a1a1aa', fontSize: '0.95rem', lineHeight: 1.6 }}>Generates a targeted fix for the highest severity issue. The patched file is written to a hardened Docker container, validated for syntax dynamically across Node.js, Python, PHP, or Ruby, and finally pushed as a Pull Request.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Pricing Section */}
       <section id="pricing" style={{ padding: 'clamp(60px, 8vw, 100px) clamp(20px, 5vw, 48px)', background: '#111113' }}>
         <div style={{ textAlign: 'center', marginBottom: 64 }}>
