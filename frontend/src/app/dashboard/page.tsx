@@ -144,7 +144,7 @@ export default function DashboardPage() {
   }
 
   return (
-    <div style={{ display: 'flex' }}>
+    <div>
       <Sidebar />
       <main className="rc-main">
         {/* Page Header */}

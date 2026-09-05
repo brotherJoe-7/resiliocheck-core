@@ -27,7 +27,7 @@ export default function AgentsPage() {
   }
 
   return (
-    <div style={{ display: 'flex' }}>
+    <div>
       <Sidebar />
       <main className="rc-main">
         <div className="rc-page-hdr">

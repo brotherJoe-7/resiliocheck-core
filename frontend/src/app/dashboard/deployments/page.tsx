@@ -18,7 +18,7 @@ export default function DeploymentsPage() {
   }, []);
 
   return (
-    <div style={{ display: 'flex' }}>
+    <div>
       <Sidebar />
       <main className="rc-main">
         <div className="rc-page-hdr">
