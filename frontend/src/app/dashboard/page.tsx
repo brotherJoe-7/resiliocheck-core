@@ -266,11 +266,11 @@ export default function DashboardPage() {
                   <tbody>
                     {scanResult.findings.map((f: any, i: number) => (
                       <tr key={i}>
-                        <td><SeverityBadge sev={f.severity} /></td>
-                        <td style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{f.owasp_class}</td>
-                        <td style={{ fontFamily: 'monospace', fontSize: '0.72rem', color: 'var(--text-muted)' }}>{f.file_path?.split('/').pop()}</td>
-                        <td style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>{f.description}</td>
-                        <td style={{ fontSize: '0.78rem', color: 'var(--green)' }}>{f.remediation}</td>
+                        <td data-label="Severity"><SeverityBadge sev={f.severity} /></td>
+                        <td data-label="OWASP Class" style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{f.owasp_class}</td>
+                        <td data-label="File" style={{ fontFamily: 'monospace', fontSize: '0.72rem', color: 'var(--text-muted)' }}>{f.file_path?.split('/').pop()}</td>
+                        <td data-label="Description" style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>{f.description}</td>
+                        <td data-label="Remediation" style={{ fontSize: '0.78rem', color: 'var(--green)' }}>{f.remediation}</td>
                       </tr>
                     ))}
                   </tbody>

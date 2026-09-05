@@ -20,7 +20,8 @@
 
 @layer base {
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { height: 100%; font-family: 'Inter', system-ui, sans-serif; background: var(--bg-base); color: var(--text-primary); }
+  html, body { height: 100%; font-family: 'Inter', system-ui, sans-serif; background: var(--bg-base); color: var(--text-primary); overflow-x: hidden; }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; max-width: 100%; }
   
   ::-webkit-scrollbar { width: 4px; height: 4px; }
   ::-webkit-scrollbar-track { background: var(--bg-base); }
@@ -260,8 +261,15 @@
   /* Metric cards */
   .rc-metric-value { font-size: 1.6rem; }
 
-  /* Table - horizontal scroll */
-  .rc-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  /* No horizontal scroll — table becomes stacked cards */
+  .rc-table-wrap { overflow: hidden; }
+  .rc-table, .rc-table thead, .rc-table tbody, .rc-table th, .rc-table td, .rc-table tr { display: block; width: 100%; }
+  .rc-table thead tr { display: none; }
+  .rc-table tr { margin-bottom: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); padding: 4px 0; }
+  .rc-table tr:last-child { margin-bottom: 0; }
+  .rc-table td { padding: 8px 14px; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 0.8rem; word-break: break-word; white-space: normal !important; }
+  .rc-table td:last-child { border-bottom: none; }
+  .rc-table td::before { content: attr(data-label); display: block; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-muted); margin-bottom: 3px; }
   
   /* Docs page */
   .rc-docs-layout { grid-template-columns: 1fr !important; }
