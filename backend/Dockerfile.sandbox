@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y curl ca-certificates && \
 
 # Install static analysis tools globally
 RUN pip install --no-cache-dir bandit pip-audit semgrep
-RUN npm install -g semgrep
+
 
 # Add a non-root user
 RUN useradd -m sandboxuser

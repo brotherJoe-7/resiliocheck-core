@@ -3,6 +3,8 @@ import os
 import uuid
 import shutil
 from datetime import datetime
+import re
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -25,7 +27,16 @@ load_dotenv()
 # Create all DB tables on startup
 models.Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="ResilioCheck AI Backend")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    db = next(get_db())
+    try:
+        seed_defaults(db)
+    finally:
+        db.close()
+    yield
+
+app = FastAPI(title="ResilioCheck AI Backend", lifespan=lifespan)
 
 app.include_router(auth.router)
 app.include_router(admin.router)
@@ -41,7 +52,6 @@ if "http://localhost:3000" not in _allowed_origins:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
-    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -129,13 +139,6 @@ def seed_defaults(db: Session):
     db.commit()
 
 
-@app.on_event("startup")
-def on_startup():
-    db = next(get_db())
-    try:
-        seed_defaults(db)
-    finally:
-        db.close()
 
 
 # ---------------------------------------------------------------------------
@@ -325,6 +328,9 @@ async def run_scan(req: ScanRequest, db: Session = Depends(get_db), current_user
 
         patched_code = pipeline_result.get("patched_code", "")
         patched_filename = pipeline_result.get("patched_filename", "patched_script.js")
+        # Sanitize filename before persisting to prevent path traversal in GitHub PRs
+        if not re.match(r"^[A-Za-z0-9._\-]+$", patched_filename):
+            patched_filename = "patched_script.txt"
 
         shutil.rmtree(workspace_dir, ignore_errors=True)
 

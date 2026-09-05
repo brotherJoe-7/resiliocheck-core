@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 import bcrypt
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from backend.database import get_db
 from backend.models import User
 
@@ -63,7 +63,7 @@ def require_admin(current_user: User = Depends(get_current_user)) -> User:
 
 class RegisterRequest(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(..., min_length=8)
     full_name: str = ""
 
 class LoginRequest(BaseModel):
