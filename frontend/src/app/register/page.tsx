@@ -3,7 +3,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../context/AuthContext';
-import { Sparkles, Hourglass, Zap, AlertTriangle } from 'lucide-react';
+import { Sparkles, Hourglass, Zap, AlertTriangle, Eye, EyeOff } from 'lucide-react';
 
 
 export default function RegisterPage() {
@@ -15,6 +15,8 @@ export default function RegisterPage() {
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -51,7 +53,7 @@ export default function RegisterPage() {
           <form onSubmit={handleSubmit}>
             <div style={{ marginBottom: 16 }}>
               <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: '#a1a1aa', marginBottom: 8 }}>Full Name</label>
-              <input type="text" value={fullName} onChange={e => setFullName(e.target.value)} placeholder="Alice Freeman" required className="rc-input" />
+              <input type="text" value={fullName} onChange={e => setFullName(e.target.value)} placeholder="Sharon Grace Peters" required className="rc-input" />
             </div>
             
             <div style={{ marginBottom: 16 }}>
@@ -61,12 +63,22 @@ export default function RegisterPage() {
             
             <div style={{ marginBottom: 16 }}>
               <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: '#a1a1aa', marginBottom: 8 }}>Password</label>
-              <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min. 8 characters" required className="rc-input" />
+              <div style={{ position: 'relative' }}>
+                <input type={showPassword ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)} placeholder="Min. 8 characters" required className="rc-input" style={{ paddingRight: 40 }} />
+                <button type="button" onClick={() => setShowPassword(!showPassword)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#a1a1aa', cursor: 'pointer' }}>
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
             </div>
             
             <div style={{ marginBottom: 24 }}>
               <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: '#a1a1aa', marginBottom: 8 }}>Confirm Password</label>
-              <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} placeholder="••••••••" required className="rc-input" />
+              <div style={{ position: 'relative' }}>
+                <input type={showConfirm ? "text" : "password"} value={confirm} onChange={e => setConfirm(e.target.value)} placeholder="••••••••" required className="rc-input" style={{ paddingRight: 40 }} />
+                <button type="button" onClick={() => setShowConfirm(!showConfirm)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#a1a1aa', cursor: 'pointer' }}>
+                  {showConfirm ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
             </div>
 
             {error && (
