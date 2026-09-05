@@ -12,6 +12,7 @@ export default function AdminPage() {
   const router = useRouter();
   const [users, setUsers] = useState<any[]>([]);
   const [stats, setStats] = useState<any>(null);
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -31,9 +32,14 @@ export default function AdminPage() {
         if (!r.ok) throw new Error(`Stats fetch failed: ${r.status}`);
         return r.json();
       }),
-    ]).then(([u, s]) => {
+      fetchApi('/api/admin/audit-logs', { headers }).then(r => {
+        if (!r.ok) return []; // Gracefully handle if not superadmin or endpoint not ready
+        return r.json();
+      }),
+    ]).then(([u, s, logs]) => {
       setUsers(Array.isArray(u) ? u : []);
       setStats(s);
+      setAuditLogs(Array.isArray(logs) ? logs : []);
       setLoading(false);
     }).catch(err => {
       setError(err.message);
@@ -145,6 +151,36 @@ export default function AdminPage() {
                         )}
                       </div>
                     </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div className="rc-card" style={{ marginTop: 24 }}>
+          <div style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 20 }}>Super Admin Audit Log</div>
+          {loading ? (
+            <div style={{ color: 'var(--text-muted)' }}>Loading audit logs...</div>
+          ) : auditLogs.length === 0 ? (
+            <div style={{ color: 'var(--text-muted)' }}>No audit logs found.</div>
+          ) : (
+            <table className="rc-table">
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>Admin</th>
+                  <th>Action</th>
+                  <th>Target / Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {auditLogs.map(log => (
+                  <tr key={log.id}>
+                    <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{new Date(log.timestamp).toLocaleString()}</td>
+                    <td style={{ fontWeight: 600 }}>{log.admin_email}</td>
+                    <td><span className={`rc-pill rc-pill-gray`}>{log.action}</span></td>
+                    <td style={{ color: 'var(--text-secondary)' }}>{log.target}</td>
                   </tr>
                 ))}
               </tbody>

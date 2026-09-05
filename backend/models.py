@@ -59,3 +59,15 @@ class Agent(Base):
     status_label = Column(String, default="Idle")
     stats       = Column(JSON, default=list)
     log         = Column(Text, default="")
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    admin_id    = Column(Integer, index=True)
+    admin_email = Column(String)
+    action      = Column(String, nullable=False)
+    target      = Column(String, nullable=False)
+    timestamp   = Column(DateTime(timezone=True), server_default=func.now())
+

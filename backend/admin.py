@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from backend.database import get_db
-from backend.models import User
-from backend.auth import require_admin
+from backend.models import User, AuditLog
+from backend.auth import require_admin, require_superadmin
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -36,7 +36,7 @@ def get_platform_stats(db: Session = Depends(get_db), _: User = Depends(require_
     }
 
 @router.post("/users/{user_id}/role")
-def update_user_role(user_id: int, role: str, db: Session = Depends(get_db), current: User = Depends(require_admin)):
+def update_user_role(user_id: int, role: str, db: Session = Depends(get_db), current: User = Depends(require_superadmin)):
     if role not in ("user", "admin", "superadmin"):
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Invalid role")
@@ -47,12 +47,22 @@ def update_user_role(user_id: int, role: str, db: Session = Depends(get_db), cur
     if user.id == current.id:
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Cannot change your own role")
+    
+    old_role = user.role
     user.role = role
+    
+    log = AuditLog(
+        admin_id=current.id,
+        admin_email=current.email,
+        action=f"ROLE_CHANGE",
+        target=f"{user.email} (from {old_role} to {role})"
+    )
+    db.add(log)
     db.commit()
     return {"status": "success", "user_id": user_id, "new_role": role}
 
 @router.delete("/users/{user_id}")
-def deactivate_user(user_id: int, db: Session = Depends(get_db), current: User = Depends(require_admin)):
+def deactivate_user(user_id: int, db: Session = Depends(get_db), current: User = Depends(require_superadmin)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         from fastapi import HTTPException
@@ -60,6 +70,29 @@ def deactivate_user(user_id: int, db: Session = Depends(get_db), current: User =
     if user.id == current.id:
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Cannot deactivate your own account")
+    
     user.is_active = False
+    
+    log = AuditLog(
+        admin_id=current.id,
+        admin_email=current.email,
+        action="USER_DEACTIVATION",
+        target=user.email
+    )
+    db.add(log)
     db.commit()
     return {"status": "deactivated", "user_id": user_id}
+
+@router.get("/audit-logs")
+def get_audit_logs(db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
+    logs = db.query(AuditLog).order_by(AuditLog.timestamp.desc()).limit(100).all()
+    return [
+        {
+            "id": l.id,
+            "admin_email": l.admin_email,
+            "action": l.action,
+            "target": l.target,
+            "timestamp": str(l.timestamp)
+        }
+        for l in logs
+    ]

@@ -58,6 +58,12 @@ def require_admin(current_user: User = Depends(get_current_user)) -> User:
         raise HTTPException(status_code=403, detail="Admin access required")
     return current_user
 
+def require_superadmin(current_user: User = Depends(get_current_user)) -> User:
+    if current_user.role != "superadmin":
+        raise HTTPException(status_code=403, detail="Superadmin access required")
+    return current_user
+
+
 
 # ── Schemas ──────────────────────────────────────────────────────────────────
 
