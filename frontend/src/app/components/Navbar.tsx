@@ -27,7 +27,7 @@ export default function Navbar({ activeItem }: { activeItem?: string }) {
         <div style={{ display: 'flex', gap: 32, fontSize: '0.85rem', color: '#a1a1aa' }} className="rc-desktop-nav">
           {NAV_ITEMS.map(item => {
             const isActive = activeItem === item;
-            const href = item === 'Pricing' ? '/' : `/${item.toLowerCase()}`;
+            const href = item === 'Pricing' ? '/#pricing' : item === 'Platform' ? '/' : `/${item.toLowerCase()}`;
             return (
               <Link
                 key={item}
@@ -58,7 +58,7 @@ export default function Navbar({ activeItem }: { activeItem?: string }) {
       <div className={`rc-nav-mobile-overlay${open ? ' open' : ''}`}>
         {NAV_ITEMS.map(item => {
           const isActive = activeItem === item;
-          const href = item === 'Pricing' ? '/' : `/${item.toLowerCase()}`;
+          const href = item === 'Pricing' ? '/#pricing' : item === 'Platform' ? '/' : `/${item.toLowerCase()}`;
           return (
             <Link key={item} href={href} className={`rc-nav-mobile-link${isActive ? ' active' : ''}`} onClick={() => setOpen(false)}>
               {item}
