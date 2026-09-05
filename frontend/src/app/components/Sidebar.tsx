@@ -1,5 +1,6 @@
 'use client';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '../context/AuthContext';
 import { LayoutGrid, Settings, Rocket, Shield, Monitor, Crown, User, LogOut } from 'lucide-react';
@@ -29,7 +30,16 @@ export default function Sidebar() {
   return (
     <aside className="rc-sidebar">
       <div className="rc-sidebar-brand">
-        <div className="rc-sidebar-logo">ResilioCheck AI</div>
+        <Link href="/" style={{ textDecoration: 'none', display: 'block' }}>
+          <Image
+            src="/logo.jpg"
+            alt="ResilioCheck AI"
+            width={160}
+            height={36}
+            style={{ objectFit: 'contain', width: '100%', height: 'auto', maxHeight: 36 }}
+            priority
+          />
+        </Link>
         <div className="rc-sidebar-sub">Autonomous Security</div>
       </div>
 

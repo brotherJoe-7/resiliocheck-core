@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 
 const NAV_ITEMS = ['Platform', 'Solutions', 'Documentation', 'Pricing'] as const;
 
@@ -11,8 +12,15 @@ export default function Navbar({ activeItem }: { activeItem?: string }) {
     <>
       <nav style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 48px', height: 60, borderBottom: '1px solid #27272a', position: 'relative', zIndex: 101, background: '#09090b' }}>
         {/* Logo */}
-        <Link href="/" style={{ textDecoration: 'none' }}>
-          <div style={{ fontWeight: 800, fontSize: '1rem', color: '#ea580c' }}>ResilioCheck AI</div>
+        <Link href="/" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center' }}>
+          <Image
+            src="/logo.jpg"
+            alt="ResilioCheck AI"
+            width={180}
+            height={40}
+            style={{ objectFit: 'contain', height: 40, width: 'auto' }}
+            priority
+          />
         </Link>
 
         {/* Desktop nav links */}
