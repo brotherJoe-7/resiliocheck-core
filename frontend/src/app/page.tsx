@@ -30,7 +30,7 @@ export default function LandingPage() {
       <Navbar activeItem="Pricing" />
 
       {/* Pricing Hero */}
-      <div style={{ flex: 1, padding: '80px 48px' }}>
+      <div style={{ flex: 1, padding: 'clamp(40px, 8vw, 80px) clamp(16px, 5vw, 48px)' }}>
         <div style={{ textAlign: 'center', marginBottom: 64 }}>
           <h1 style={{ fontSize: '3rem', fontWeight: 800, color: '#ea580c', letterSpacing: '-1px', marginBottom: 16 }}>
             Autonomous Security Pricing
@@ -41,7 +41,7 @@ export default function LandingPage() {
         </div>
 
         {/* Pricing Cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20, maxWidth: 1000, margin: '0 auto' }}>
+        <div className="rc-grid-3" style={{ maxWidth: 1000, margin: '0 auto' }}>
           {PLANS.map(plan => (
             <div key={plan.name} style={{ background: '#141417', border: plan.highlight ? '1px solid #ea580c' : '1px solid #27272a', borderRadius: 10, padding: '32px 28px', position: 'relative', display: 'flex', flexDirection: 'column' }}>
               {plan.highlight && (
@@ -73,10 +73,9 @@ export default function LandingPage() {
         </div>
       </div>
 
-      {/* Footer */}
-      <footer style={{ borderTop: '1px solid #27272a', padding: '20px 48px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <footer style={{ borderTop: '1px solid #27272a', padding: '20px 20px', display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
         <div style={{ fontSize: '0.75rem', color: '#52525b' }}>© 2024 ResilioCheck AI. All rights reserved.</div>
-        <div style={{ display: 'flex', gap: 24, fontSize: '0.75rem', color: '#52525b' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, fontSize: '0.75rem', color: '#52525b' }}>
           {[
             { label: 'Privacy Policy', path: '/privacy' },
             { label: 'Terms of Service', path: '/terms' },

@@ -19,7 +19,7 @@ export default function DocumentationPage() {
         <Navbar activeItem="Documentation" />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', maxWidth: 1100, margin: '0 auto', padding: '0 24px' }}>
+      <div className="rc-docs-layout" style={{ display: 'grid', gridTemplateColumns: '220px 1fr', maxWidth: 1100, margin: '0 auto', padding: '0 24px' }}>
         {/* Sidebar */}
         <aside style={{ position: 'sticky', top: 60, height: 'fit-content', padding: '40px 0', borderRight: '1px solid #18181b' }}>
           <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#52525b', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 16 }}>Documentation</div>

@@ -28,7 +28,7 @@ export default function PlatformPage() {
           </p>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+        <div className="rc-grid-2" style={{ gap: 20 }}>
           {features.map(({ Icon, title, desc }) => (
             <div key={title} style={{ background: '#111113', border: '1px solid #27272a', borderRadius: 12, padding: '28px 24px' }}>
               <div style={{ marginBottom: 12, color: '#ea580c' }}><Icon size={24} /></div>
@@ -38,7 +38,7 @@ export default function PlatformPage() {
           ))}
         </div>
 
-        <div style={{ textAlign: 'center', marginTop: 72 }}>
+        <div style={{ textAlign: 'center', marginTop: 72, padding: '0 16px' }}>
           <Link href="/register" style={{ background: '#ea580c', color: '#fff', borderRadius: 8, padding: '14px 32px', textDecoration: 'none', fontWeight: 700, fontSize: '1rem' }}>
             Start Scanning Free →
           </Link>

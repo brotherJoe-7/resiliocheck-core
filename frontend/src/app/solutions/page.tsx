@@ -42,7 +42,7 @@ export default function SolutionsPage() {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           {solutions.map((s) => (
-            <div key={s.tag} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 40, background: '#111113', border: '1px solid #27272a', borderRadius: 16, padding: '40px 36px', alignItems: 'center' }}>
+            <div key={s.tag} className="rc-grid-2" style={{ gap: 40, background: '#111113', border: '1px solid #27272a', borderRadius: 16, padding: '40px 28px', alignItems: 'center' }}>
               <div>
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: 'rgba(234,88,12,0.1)', border: '1px solid rgba(234,88,12,0.3)', borderRadius: 6, padding: '4px 12px', marginBottom: 20 }}>
                   <s.Icon size={16} color="#ea580c" />
