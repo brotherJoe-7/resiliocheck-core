@@ -32,10 +32,16 @@ app.include_router(admin.router)
 
 from fastapi.concurrency import run_in_threadpool
 
+_raw_origins = os.getenv("FRONTEND_URL", "http://localhost:3000")
+_allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+# Always include localhost for local development
+if "http://localhost:3000" not in _allowed_origins:
+    _allowed_origins.append("http://localhost:3000")
+
 app.add_middleware(
     CORSMiddleware,
-    # C5: Restrict CORS origin
-    allow_origins=[os.getenv("FRONTEND_URL", "http://localhost:3000")],
+    allow_origins=_allowed_origins,
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
