@@ -1,9 +1,11 @@
 'use client';
 import { fetchApi } from '@/app/utils/apiClient';
 import { useState, useEffect } from 'react';
+import { useAuth } from '../../context/AuthContext';
 import Sidebar from '../../components/Sidebar';
 
 export default function SettingsPage() {
+  const { user } = useAuth();
   const [settings, setSettings] = useState<any>(null);
   const [workspace, setWorkspace] = useState('');
   const [timezone, setTimezone] = useState('');
@@ -117,21 +119,23 @@ export default function SettingsPage() {
                 <button className="rc-btn-secondary" style={{ width: '100%' }} onClick={() => alert('Billing portal is coming soon.')}>Manage Billing</button>
               </div>
 
-              <div className="rc-card">
-                <div style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 16 }}>Team Members ({settings.team.length})</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {settings.team.map((m: any) => (
-                    <div key={m.email} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>
-                      <div>
-                        <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>{m.name}</div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{m.email}</div>
+              {(user?.role === 'admin' || user?.role === 'superadmin') && (
+                <div className="rc-card">
+                  <div style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 16 }}>Team Members ({settings.team.length})</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    {settings.team.map((m: any) => (
+                      <div key={m.email} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>
+                        <div>
+                          <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>{m.name}</div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{m.email}</div>
+                        </div>
+                        <div style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: 4, background: 'var(--bg-base)', color: 'var(--text-secondary)' }}>{m.role}</div>
                       </div>
-                      <div style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: 4, background: 'var(--bg-base)', color: 'var(--text-secondary)' }}>{m.role}</div>
-                    </div>
-                  ))}
-                  <button className="rc-btn-secondary" style={{ marginTop: 8 }} onClick={() => alert('Invite member feature is coming soon.')}>+ Invite Member</button>
+                    ))}
+                    <button className="rc-btn-secondary" style={{ marginTop: 8 }} onClick={() => alert('Invite member feature is coming soon.')}>+ Invite Member</button>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </div>
         )}

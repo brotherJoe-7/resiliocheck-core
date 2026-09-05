@@ -637,9 +637,14 @@ _settings = {
 
 @app.get("/api/settings")
 def get_settings(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    # Populate team from real users table
-    users = db.query(models.User).all()
-    team  = [{"name": u.full_name or u.email, "email": u.email, "role": u.role} for u in users]
+    team = []
+    if current_user.role in ["admin", "superadmin"]:
+        users = db.query(models.User).all()
+        team = [{"name": u.full_name or u.email, "email": u.email, "role": u.role} for u in users]
+    else:
+        # Standard users only see themselves in the team list
+        team = [{"name": current_user.full_name or current_user.email, "email": current_user.email, "role": current_user.role}]
+        
     return {**_settings, "team": team}
 
 
