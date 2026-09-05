@@ -47,3 +47,13 @@ tmp_workspace/
 tmp_workspace_*/
 
 resiliocheck.db
+*.db
+*.sqlite3
+
+# ── Scratch / temp ────────────────────────────────────────────────────────────
+scratch/
+*.tmp
+
+# ── GCP / cloud service account keys ─────────────────────────────────────────
+*-*.json
+*.json.bak
