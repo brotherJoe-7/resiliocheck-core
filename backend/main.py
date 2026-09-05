@@ -239,24 +239,57 @@ async def run_scan(req: ScanRequest, db: Session = Depends(get_db), current_user
             # --- HYBRID SAST PREFILTER ---
             # Run local SAST over the entire extracted repo
             flagged_files = run_local_sast_prefilter(workspace_dir)
-            
-            # Filter the source files to only those that were flagged (or have secrets)
-            # If nothing was flagged natively, we still pass a few priority files to AI just in case.
-            filtered_srcs = {}
+
+            # Patterns that indicate test/fixture/lock/generated files — low value for AI analysis
+            _TEST_SKIP = re.compile(
+                r'(test_|_test\.|\.test\.|\.spec\.|__tests__|/tests/|/test/|'
+                r'node_modules|\.lock$|package-lock|yarn\.lock|\.min\.js$|'
+                r'\.map$|migrations?/|fixtures?/)',
+                re.IGNORECASE
+            )
+            # High-priority application code patterns
+            _APP_PRIORITY = re.compile(
+                r'(route|controller|model|middleware|auth|service|handler|'
+                r'app\.(py|js|ts)|main\.(py|js|ts)|server\.(js|ts|py)|'
+                r'api/|views?\.|schema|serializer|util|helper|config(?!.*lock))',
+                re.IGNORECASE
+            )
+
+            # Separate files into priority buckets
+            priority_srcs = {}   # SAST-flagged OR high-priority app files
+            secondary_srcs = {}  # Everything else (including secret-only test files)
+
             for path, content in srcs.items():
                 rel_path = os.path.relpath(path, workspace_dir).replace("\\", "/")
-                # Also include files with secret findings
+                is_test_file = bool(_TEST_SKIP.search(rel_path))
+                is_flagged = rel_path in flagged_files
+                is_app_file = bool(_APP_PRIORITY.search(rel_path))
                 has_secret = any(f['file'] == os.path.basename(path) for f in secrets)
-                if rel_path in flagged_files or has_secret:
+
+                if is_flagged or (is_app_file and not is_test_file):
+                    priority_srcs[path] = content
+                elif has_secret and not is_test_file:
+                    priority_srcs[path] = content
+                else:
+                    secondary_srcs[path] = content
+
+            # Build the final set: priority files first, fill up to 15 files max
+            MAX_FILES_FOR_AI = 15
+            filtered_srcs = dict(list(priority_srcs.items())[:MAX_FILES_FOR_AI])
+            if len(filtered_srcs) < MAX_FILES_FOR_AI:
+                remaining = MAX_FILES_FOR_AI - len(filtered_srcs)
+                # Add secondary files (which may include test files with secrets) to fill quota
+                for path, content in list(secondary_srcs.items())[:remaining]:
                     filtered_srcs[path] = content
-                    
-            # If the prefilter found nothing, provide the top 3 highest-scored files as a fallback
+
+            # Hard fallback — if somehow still empty, take first 5 files
             if not filtered_srcs:
-                print("Prefilter returned 0 files. Falling back to top 3 generic files.")
-                filtered_srcs = {k: srcs[k] for k in list(srcs.keys())[:3]}
-            
-            print(f"Passing {len(filtered_srcs)} files to LLM AI pipeline.")
-            
+                print("All filters returned 0 files. Falling back to first 5 files.")
+                filtered_srcs = {k: srcs[k] for k in list(srcs.keys())[:5]}
+
+            print(f"Passing {len(filtered_srcs)} files to LLM AI pipeline "
+                  f"({len(priority_srcs)} priority, {len(secondary_srcs)} secondary).")
+
             pipe_res = run_pipeline(filtered_srcs, secrets)
             verdict = "SKIPPED"
             p_code = pipe_res.get("patched_code", "")
