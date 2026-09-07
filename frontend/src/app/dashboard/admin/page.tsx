@@ -23,26 +23,24 @@ export default function AdminPage() {
     if (user.role !== 'superadmin' && user.role !== 'admin') { router.push('/dashboard'); return; }
 
     const headers = { Authorization: `Bearer ${token}` };
-    Promise.all([
-      fetchApi('/api/admin/users', { headers }).then(r => {
-        if (!r.ok) throw new Error(`Users fetch failed: ${r.status}`);
-        return r.json();
-      }),
-      fetchApi('/api/admin/stats', { headers }).then(r => {
-        if (!r.ok) throw new Error(`Stats fetch failed: ${r.status}`);
-        return r.json();
-      }),
-      fetchApi('/api/admin/audit-logs', { headers }).then(r => {
-        if (!r.ok) return []; // Gracefully handle if not superadmin or endpoint not ready
-        return r.json();
-      }),
-    ]).then(([u, s, logs]) => {
+
+    // Fetch each endpoint individually so one failure doesn't block everything
+    const fetchUsers = fetchApi('/api/admin/users', { headers })
+      .then(r => { if (!r.ok) throw new Error(`Users: ${r.status} ${r.statusText}`); return r.json(); })
+      .catch(e => { setError(e.message); return []; });
+
+    const fetchStats = fetchApi('/api/admin/stats', { headers })
+      .then(r => { if (!r.ok) throw new Error(`Stats: ${r.status} ${r.statusText}`); return r.json(); })
+      .catch(e => { setError(e.message); return null; });
+
+    const fetchLogs = fetchApi('/api/admin/audit-logs', { headers })
+      .then(r => { if (!r.ok) return []; return r.json(); })
+      .catch(() => []);
+
+    Promise.all([fetchUsers, fetchStats, fetchLogs]).then(([u, s, logs]) => {
       setUsers(Array.isArray(u) ? u : []);
       setStats(s);
       setAuditLogs(Array.isArray(logs) ? logs : []);
-      setLoading(false);
-    }).catch(err => {
-      setError(err.message);
       setLoading(false);
     });
   }, [user, token, authLoading]);
@@ -97,7 +95,7 @@ export default function AdminPage() {
 
         {error && (
           <div style={{ margin: '0 0 20px', padding: '12px 16px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 8, color: 'var(--red)', fontSize: '0.85rem' }}>
-            <AlertTriangle size={16} /> {error} — Make sure the FastAPI backend is running on port 8000 and you are logged in.
+            <AlertTriangle size={16} /> API Error: {error}. Please ensure you are logged in with an admin or superadmin account.
           </div>
         )}
 
