@@ -64,7 +64,7 @@ export default function DashboardPage() {
       const res  = await fetchApi('/api/scans');
       const data = await res.json();
       if (Array.isArray(data)) setHistory(data);
-    } catch { /* backend may not be running yet */ }
+    } catch (_e) { /* backend may not be running yet */ }
   }, []);
 
   useEffect(() => { loadHistory(); }, [loadHistory]);

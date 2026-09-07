@@ -25,7 +25,7 @@ export default function DeploymentsPage() {
       const res = await fetchApi(`/api/scans/${dep.scan_id}`);
       const scan = await res.json();
       setLogsModal({ open: true, scan, loading: false });
-    } catch {
+    } catch (_e) {
       setLogsModal({ open: true, scan: { error: 'Failed to load logs.' }, loading: false });
     }
   }
