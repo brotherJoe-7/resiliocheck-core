@@ -136,7 +136,7 @@ export default function LandingPage() {
               <div style={{ flexShrink: 0, width: 48, height: 48, background: '#10b981', borderRadius: '50%', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800 }}>A2</div>
               <div>
                 <h4 style={{ color: '#10b981', fontSize: '1.2rem', marginBottom: 8, fontWeight: 700 }}>Gate Decision Agent</h4>
-                <p style={{ color: '#a1a1aa', fontSize: '0.95rem', lineHeight: 1.6 }}>Enforces strict numeric policies dynamically. If a PR contains >= 1 Critical or >= 3 High vulnerabilities, this agent automatically triggers a `BLOCKED` state in your CI/CD pipeline.</p>
+                <p style={{ color: '#a1a1aa', fontSize: '0.95rem', lineHeight: 1.6 }}>Enforces strict numeric policies dynamically. If a PR contains ≥ 1 Critical or ≥ 3 High vulnerabilities, this agent automatically triggers a <code>BLOCKED</code> state in your CI/CD pipeline.</p>
               </div>
             </div>
 
