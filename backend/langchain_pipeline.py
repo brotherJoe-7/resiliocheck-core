@@ -37,7 +37,7 @@ GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
 # Internal helpers
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-@retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=2, max=10))
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=8))
 def _call_groq(system: str, user: str, temperature: float = 0.0) -> str:
     """
     Single Groq API call. Returns the raw text content from the model.
@@ -57,7 +57,16 @@ def _call_groq(system: str, user: str, temperature: float = 0.0) -> str:
         "temperature": temperature,
     }
     resp = requests.post(GROQ_URL, headers=headers, json=payload, timeout=60)
-    resp.raise_for_status()
+    if not resp.ok:
+        # Surface the actual Groq error message for easier debugging
+        try:
+            err_body = resp.json()
+            err_msg  = err_body.get("error", {}).get("message", resp.text[:300])
+        except Exception:
+            err_msg = resp.text[:300]
+        raise RuntimeError(
+            f"Groq API error {resp.status_code} for model '{GROQ_MODEL}': {err_msg}"
+        )
     data    = resp.json()
     choices = data.get("choices") or []
     content = (choices[0].get("message") or {}).get("content", "") if choices else ""
