@@ -601,6 +601,7 @@ def get_deployments(db: Session = Depends(get_db), current_user: models.User = D
         passed = s.gate == "APPROVED"
         deployments.append({
             "id":        dep_id,
+            "scan_id":   s.id,
             "status":    "Success" if passed else "Failed",
             "statusCls": "rc-pill-teal" if passed else "rc-pill-red",
             "icon":      "✓" if passed else "!",
@@ -615,6 +616,31 @@ def get_deployments(db: Session = Depends(get_db), current_user: models.User = D
             "actions": ["Logs"] + (["Rollback"] if not passed else []),
         })
     return deployments
+
+
+@app.get("/api/scans/{scan_id}")
+def get_scan_detail(scan_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """Return full detail for a single scan result (used by Logs modal)."""
+    s = db.query(models.ScanResult).filter(models.ScanResult.id == scan_id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    return {
+        "id":               s.id,
+        "repo_url":         s.repo_url,
+        "branch":           s.branch,
+        "engine":           s.engine,
+        "gate":             s.gate,
+        "gate_rationale":   s.gate_rationale,
+        "critical_count":   s.critical_count,
+        "high_count":       s.high_count,
+        "findings":         s.findings or [],
+        "explanation":      s.explanation,
+        "patched_filename": s.patched_filename,
+        "patch_status":     s.patch_status,
+        "secret_findings":  s.secret_findings or [],
+        "sandbox_verdict":  s.sandbox_verdict,
+        "scanned_at":       str(s.scanned_at),
+    }
 
 
 # ── Settings ─────────────────────────────────────────────────────────────────
