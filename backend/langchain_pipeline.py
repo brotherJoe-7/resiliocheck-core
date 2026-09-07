@@ -35,15 +35,24 @@ GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
 
 # ---------------------------------------------------------------------------
 # Internal helpers
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=8))
+class _TransientGroqError(Exception):
+    """Raised only for 429/503 so tenacity knows to retry."""
+
+def _is_transient(e: Exception) -> bool:
+    return isinstance(e, _TransientGroqError)
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=8), retry=retry_if_exception(_is_transient))
 def _call_groq(system: str, user: str, temperature: float = 0.0) -> str:
     """
     Single Groq API call. Returns the raw text content from the model.
-    Retries automatically with exponential backoff on 429 errors.
-    Raises RuntimeError on API failure after retries.
+    Only retries on 429 (rate-limit) and 503 (service unavailable).
+    Raises RuntimeError immediately on permanent errors (404, 401, 400).
     """
+    if not GROQ_API_KEY:
+        raise RuntimeError("GROQ_API_KEY environment variable is not set.")
+
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type":  "application/json",
@@ -56,21 +65,32 @@ def _call_groq(system: str, user: str, temperature: float = 0.0) -> str:
         ],
         "temperature": temperature,
     }
+
+    print(f"[Groq] Calling model: {GROQ_MODEL}")
     resp = requests.post(GROQ_URL, headers=headers, json=payload, timeout=60)
+
     if not resp.ok:
-        # Surface the actual Groq error message for easier debugging
         try:
             err_body = resp.json()
-            err_msg  = err_body.get("error", {}).get("message", resp.text[:300])
+            err_msg  = err_body.get("error", {}).get("message", resp.text[:400])
         except Exception:
-            err_msg = resp.text[:300]
+            err_msg = resp.text[:400]
+
+        # Only retry on rate-limit and transient server errors
+        if resp.status_code in (429, 503):
+            raise _TransientGroqError(f"Groq {resp.status_code}: {err_msg}")
+
+        # Permanent error — raise immediately (do NOT retry)
         raise RuntimeError(
-            f"Groq API error {resp.status_code} for model '{GROQ_MODEL}': {err_msg}"
+            f"Groq API error {resp.status_code} using model '{GROQ_MODEL}': {err_msg}. "
+            f"Check that GROQ_MODEL is set correctly in Cloud Run environment variables."
         )
+
     data    = resp.json()
     choices = data.get("choices") or []
     content = (choices[0].get("message") or {}).get("content", "") if choices else ""
     return content.strip()
+
 
 
 def _parse_json(raw: str, fallback: dict) -> dict:

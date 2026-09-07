@@ -216,6 +216,25 @@ def _scan_to_dict(s: models.ScanResult) -> dict:
 def health_check():
     return {"status": "online", "service": "ResilioCheck AI Core Engine"}
 
+@app.get("/api/health")
+def api_health():
+    """Returns config info for diagnostics — model name, key presence, DB status."""
+    import os
+    from backend.database import engine
+    try:
+        with engine.connect() as conn:
+            conn.execute(__import__('sqlalchemy').text("SELECT 1"))
+        db_status = "connected"
+    except Exception as e:
+        db_status = f"error: {e}"
+    return {
+        "status":       "online",
+        "groq_model":   os.getenv("GROQ_MODEL", "openai/gpt-oss-20b (default)"),
+        "groq_key_set": bool(os.getenv("GROQ_API_KEY")),
+        "db_status":    db_status,
+    }
+
+
 
 from backend.auth import get_current_user, require_admin
 
