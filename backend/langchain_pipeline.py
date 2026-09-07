@@ -30,7 +30,7 @@ from config.prompts import (
 load_dotenv()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL   = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
+GROQ_MODEL   = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
 
 # ---------------------------------------------------------------------------
@@ -289,6 +289,35 @@ def run_pipeline(source_files: dict, secret_findings: list) -> dict:
     # Step 2: Gate decision
     gate_result = run_gate_agent(owasp_result)
 
+    # Step 2.5: Secrets gate override
+    # Real credentials found by the pre-scan secrets scanner are always CRITICAL.
+    # Patterns that indicate genuine secrets (not false positives like CDN URLs):
+    REAL_SECRET_PATTERNS = {"hardcoded password", "api key", "token", "secret", "private key", "credentials", "generic secret"}
+    real_secrets = [
+        f for f in secret_findings
+        if any(p in f.get("pattern", "").lower() for p in REAL_SECRET_PATTERNS)
+    ]
+    if real_secrets and gate_result.get("gate") != "BLOCKED":
+        print(f"[Pipeline] Secrets gate override: {len(real_secrets)} real credential(s) found → forcing BLOCKED")
+        gate_result["gate"] = "BLOCKED"
+        gate_result["rationale"] = (
+            f"{len(real_secrets)} hardcoded credential(s) detected by pre-scan secrets scanner. "
+            "Hardcoded secrets are a critical security risk (OWASP A02/A07)."
+        )
+        # Inject them as findings too if not already in the OWASP result
+        for sf in real_secrets:
+            owasp_result["findings"].append({
+                "file_path":   sf.get("file", "unknown"),
+                "line_start":  sf.get("line", 0),
+                "line_end":    sf.get("line", 0),
+                "owasp_class": "A02 – Cryptographic Failures",
+                "severity":    "CRITICAL",
+                "title":       f"Hardcoded Secret: {sf.get('pattern', 'Unknown')}",
+                "description": f"Hardcoded credential detected in {sf.get('file')}: {sf.get('snippet', '')[:80]}",
+                "remediation": "Move credentials to environment variables and rotate the exposed secret immediately.",
+            })
+        owasp_result["critical_count"] = owasp_result.get("critical_count", 0) + len(real_secrets)
+
     # Step 3: Patch generation (only if issues found)
     patched_code = ""
     patched_filename = ""
@@ -303,10 +332,11 @@ def run_pipeline(source_files: dict, secret_findings: list) -> dict:
     if findings:
         lines = []
         for f in findings:
+            sev = f.get('severity', 'INFO')
             lines.append(
-                f"[{f.get('severity', 'INFO')}] {f.get('owasp_class', '')} — "
-                f"{f.get('file_path', '')} — {f.get('description', '')} "
-                f"| Fix: {f.get('remediation', '')}"
+                f"[{sev}] {f.get('title', f.get('owasp_class', ''))} — "
+                f"{f.get('file_path', '')} (line {f.get('line_start', '?')}) — "
+                f"{f.get('description', '')} | Fix: {f.get('remediation', '')}"
             )
         explanation = (
             f"ResilioCheck AI identified {len(findings)} security issue(s) "
@@ -319,16 +349,16 @@ def run_pipeline(source_files: dict, secret_findings: list) -> dict:
             "ResilioCheck AI completed a full OWASP Top 10 analysis. "
             "No definitive vulnerabilities were detected in the scanned files. "
             f"Gate verdict: {gate_result.get('gate', 'APPROVED')}. "
-            f"{gate_result.get('rationale', '')}"
+            f"{gate_result.get('rationale', 'No critical or high severity findings detected.')}"
         )
 
     return {
-        "findings":       findings,
-        "critical_count": owasp_result.get("critical_count", 0),
-        "high_count":     owasp_result.get("high_count", 0),
-        "gate":           gate_result.get("gate", "APPROVED"),
-        "gate_rationale": gate_result.get("rationale", ""),
-        "explanation":    explanation,
-        "patched_code":   patched_code,
+        "findings":         findings,
+        "critical_count":   owasp_result.get("critical_count", 0),
+        "high_count":       owasp_result.get("high_count", 0),
+        "gate":             gate_result.get("gate", "APPROVED"),
+        "gate_rationale":   gate_result.get("rationale", ""),
+        "explanation":      explanation,
+        "patched_code":     patched_code,
         "patched_filename": patched_filename,
     }
