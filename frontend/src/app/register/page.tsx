@@ -1,14 +1,23 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '../context/AuthContext';
 import { Sparkles, Hourglass, Zap, AlertTriangle, Eye, EyeOff } from 'lucide-react';
 
 
-export default function RegisterPage() {
-  const { register } = useAuth();
+function RegisterPageInner() {
+  const { register, token, loading: authLoading } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const nextPath = (() => {
+    const n = searchParams.get('next') || '/dashboard';
+    return n.startsWith('/') && !n.startsWith('//') ? n : '/dashboard';
+  })();
+
+  useEffect(() => {
+    if (!authLoading && token) router.replace(nextPath);
+  }, [authLoading, token, router, nextPath]);
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -26,9 +35,9 @@ export default function RegisterPage() {
     setLoading(true);
     try {
       await register(email, password, fullName);
-      router.push('/dashboard');
-    } catch (err: any) {
-      setError(err.message);
+      router.push(nextPath);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Registration failed');
     } finally {
       setLoading(false);
     }
@@ -102,5 +111,13 @@ export default function RegisterPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function RegisterPage() {
+  return (
+    <Suspense fallback={<div style={{ minHeight: '100vh', background: '#09090b' }} />}>
+      <RegisterPageInner />
+    </Suspense>
   );
 }

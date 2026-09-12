@@ -155,6 +155,7 @@
   .rc-pill-yellow { background: rgba(234,179,8,0.1); border: 1px solid rgba(234,179,8,0.25); color: var(--yellow); }
   .rc-pill-orange { background: rgba(234,88,12,0.1); border: 1px solid rgba(234,88,12,0.25); color: var(--accent); }
   .rc-pill-teal { background: rgba(20,184,166,0.1); border: 1px solid rgba(20,184,166,0.25); color: var(--teal); }
+  .rc-pill-gray { background: rgba(161,161,170,0.1); border: 1px solid rgba(161,161,170,0.25); color: var(--text-muted); }
   
   /* Table */
   .rc-table { width: 100%; border-collapse: collapse; }

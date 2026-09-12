@@ -35,6 +35,7 @@ class ScanResult(Base):
     patch_status    = Column(String, default="PENDING")    # PENDING | APPROVED | REJECTED | APPLIED
     secret_findings = Column(JSON, default=list)
     sandbox_verdict = Column(String, default="SKIPPED")
+    model           = Column(String, default="")           # Groq model that produced the analysis
     scanned_at      = Column(DateTime(timezone=True), server_default=func.now())
 
 

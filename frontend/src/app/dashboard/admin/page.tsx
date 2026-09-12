@@ -1,5 +1,6 @@
 'use client';
-import { fetchApi } from '@/app/utils/apiClient';
+import { apiJson, readError, fetchApi } from '@/app/utils/apiClient';
+import type { AdminUser, AdminStats, AuditLog } from '@/app/types';
 import { useState, useEffect } from 'react';
 import Sidebar from '../../components/Sidebar';
 import { useAuth } from '../../context/AuthContext';
@@ -10,9 +11,9 @@ import { Settings, AlertTriangle } from 'lucide-react';
 export default function AdminPage() {
   const { user, token, loading: authLoading } = useAuth();
   const router = useRouter();
-  const [users, setUsers] = useState<any[]>([]);
-  const [stats, setStats] = useState<any>(null);
-  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [stats, setStats] = useState<AdminStats | null>(null);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -43,22 +44,32 @@ export default function AdminPage() {
       setAuditLogs(Array.isArray(logs) ? logs : []);
       setLoading(false);
     });
-  }, [user, token, authLoading]);
+  }, [user, token, authLoading, router]);
 
   async function updateRole(userId: number, newRole: string) {
-    await fetchApi(`/api/admin/users/${userId}/role?role=${newRole}`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    setUsers(u => u.map(x => x.id === userId ? { ...x, role: newRole } : x));
+    setError('');
+    try {
+      await apiJson(`/api/admin/users/${userId}/role`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: newRole }),
+      });
+      setUsers(u => u.map(x => x.id === userId ? { ...x, role: newRole } : x));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to update role');
+    }
   }
 
   async function deactivate(userId: number) {
-    await fetchApi(`/api/admin/users/${userId}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    setUsers(u => u.map(x => x.id === userId ? { ...x, is_active: false } : x));
+    if (!confirm('Deactivate this user? They will no longer be able to sign in.')) return;
+    setError('');
+    try {
+      const res = await fetchApi(`/api/admin/users/${userId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(await readError(res, 'Failed to deactivate user'));
+      setUsers(u => u.map(x => x.id === userId ? { ...x, is_active: false } : x));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to deactivate user');
+    }
   }
 
   const rolePill = (role: string) => {

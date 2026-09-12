@@ -25,20 +25,42 @@ venv\Scripts\activate  # Windows
 # source venv/bin/activate  # Mac/Linux
 
 # Install requirements
-pip install fastapi uvicorn groq python-dotenv gitpython langchain langchain-groq sqlalchemy docker
+pip install -r requirements.txt          # runtime
+pip install -r requirements-dev.txt      # + pytest / httpx for the test-suite
+
+# Configure
+cp .env.example .env                     # then set GROQ_API_KEY (and JWT_SECRET_KEY in production)
 
 # Start the server (runs on port 8000)
 uvicorn backend.main:app --reload --port 8000
+
+# Run the tests (Groq + GitHub are mocked — no network needed)
+pytest -q
 ```
-*API Documentation is available at http://localhost:8000/docs*
+*API Documentation is available at http://localhost:8000/docs — a config/diagnostics summary at http://localhost:8000/api/health*
+
+> **Docker sandbox is optional.** If no Docker daemon / `resiliocheck-sandbox` image is available (e.g. on Cloud Run) the sandbox stage is reported as `SKIPPED` instead of failing the scan. Build the image with `docker build -t resiliocheck-sandbox:latest -f backend/Dockerfile.sandbox .` to enable it.
 
 ### 2. Start the Frontend (Next.js)
 ```bash
 cd frontend
+cp .env.example .env.local     # NEXT_PUBLIC_API_URL=http://localhost:8000
 npm install
 npm run dev
 ```
 *The dashboard will be available at http://localhost:3000*
+
+### 3. Groq models & rate limits
+
+| Setting | Default | Notes |
+|---|---|---|
+| `GROQ_MODEL` | `openai/gpt-oss-120b` | Strongest model on the Groq free/developer tier |
+| `GROQ_FALLBACK_MODELS` | `openai/gpt-oss-20b,qwen/qwen3.6-27b,…` | Tried in order on 429 / 404 / decommission |
+| `LLM_TPM_BUDGET` | `8000` | Free-tier tokens-per-minute; every request is trimmed to fit |
+| `LLM_MAX_TOTAL_WAIT_SECONDS` | `150` | Max time spent honouring `retry-after` before returning a clean HTTP 429 |
+| `GATE_AGENT_MODE` | `deterministic` | Gate verdict is computed locally (0 extra LLM calls); set `llm` to add model confirmation |
+
+Groq rate limits are enforced **per model**, so when the primary model returns `429` the pipeline hops to the next model immediately instead of sleeping. `llama-3.3-70b-versatile` is enterprise-only on Groq since Aug 2026 and is therefore only a late fallback.
 
 ## 🔌 API Endpoints (Backend)
 
@@ -46,8 +68,12 @@ The Next.js frontend is fully dynamic and communicates with these FastAPI endpoi
 
 | Endpoint | Method | Description |
 |---|---|---|
-| `/api/scan` | `POST` | Initiates the LangChain multi-agent pipeline on a GitHub repository. |
-| `/api/scans`| `GET`  | Retrieves persistent scan history from the SQLite database. |
+| `/api/health` | `GET` | Non-secret diagnostics: model chain, key presence, DB & sandbox status. |
+| `/api/auth/register` `/login` `/me` | `POST`/`GET` | JWT authentication. First registered user becomes `superadmin`. |
+| `/api/scan` | `POST` | Runs the multi-agent pipeline on a public GitHub repository (`repo_url`, `branch`, `engine`). |
+| `/api/scans`| `GET`  | Retrieves persistent scan history. `/api/scans/{id}` returns one scan. |
+| `/api/scans/{id}/apply-patch` | `POST` | Opens a GitHub PR with the AI patch (needs `GITHUB_TOKEN`). |
+| `/api/scans/{id}/reject-patch` | `POST` | Marks the patch as rejected. |
 | `/api/agents` | `GET` | Retrieves the status of all autonomous agents. |
 | `/api/agents/{id}/toggle` | `POST` | Toggles an agent's active status. |
 | `/api/gates` | `GET` | Retrieves the status of security gates. |
@@ -62,8 +88,8 @@ The ResilioCheck AI platform consists of several core modules that work together
 ### 1. LangChain Multi-Agent AI Pipeline
 The core engine of ResilioCheck. It downloads the source code into an isolated sandbox, performing a deterministic pre-scan for secrets, followed by a 3-stage LLM workflow:
 - **OWASP Classification Agent**: Analyzes code files for deep semantic vulnerabilities (SQLi, Broken Access Control) returning structured JSON.
-- **Gate Decision Agent**: Enforces strict numeric policies (e.g. `BLOCKED` if Critical >= 1 or High >= 3) against the findings.
-- **Patch Generator & Sandbox**: Generates a targeted fix for the highest severity issue. The patched file is then written back to disk and syntax-validated inside a hardened Docker container, which dynamically supports multiple languages (`.js`, `.ts` via Node 22, `.py`, `.php`, `.rb`, `.sh`).
+- **Gate Decision Agent**: Enforces the numeric policy `BLOCKED` if Critical ≥ 1 or High ≥ 3. Severity counts are always recomputed from the findings list (the model's own arithmetic is never trusted), and hardcoded secrets found by the deterministic pre-scan are merged in as CRITICAL findings.
+- **Patch Generator & Sandbox**: Generates a complete, PR-ready corrected file for the highest-severity finding (files up to `PATCH_MAX_FILE_CHARS`). When a Docker daemon is available the patch is syntax-validated inside a hardened container (`.js`, `.ts` via Node 22, `.py`, `.php`, `.rb`, `.sh`); otherwise the sandbox stage is `SKIPPED`.
 
 ### 2. 🔄 Automated Pull Requests & Remediation Workflow
 When a vulnerability is detected and a patch is successfully generated in the sandbox, users can push the fix directly to GitHub.

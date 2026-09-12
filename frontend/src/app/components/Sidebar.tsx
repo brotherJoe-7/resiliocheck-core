@@ -3,7 +3,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '../context/AuthContext';
-import { LayoutGrid, Settings, Rocket, Shield, Monitor, Crown, User, LogOut, Menu, X } from 'lucide-react';
+import { LayoutGrid, Settings, Rocket, Shield, Monitor, Crown, User, LogOut, Menu } from 'lucide-react';
 import { useState } from 'react';
 
 const NAV = [

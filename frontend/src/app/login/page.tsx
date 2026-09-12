@@ -1,14 +1,24 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '../context/AuthContext';
 import { Hourglass, Zap, AlertTriangle, Eye, EyeOff } from 'lucide-react';
 
 
-export default function LoginPage() {
-  const { login } = useAuth();
+function LoginPageInner() {
+  const { login, token, loading: authLoading } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const nextPath = (() => {
+    const n = searchParams.get('next') || '/dashboard';
+    return n.startsWith('/') && !n.startsWith('//') ? n : '/dashboard';
+  })();
+
+  // Already signed in -> skip the form
+  useEffect(() => {
+    if (!authLoading && token) router.replace(nextPath);
+  }, [authLoading, token, router, nextPath]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -21,9 +31,9 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await login(email, password);
-      router.push('/dashboard');
-    } catch (err: any) {
-      setError(err.message);
+      router.push(nextPath);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Login failed');
     } finally {
       setLoading(false);
     }
@@ -106,5 +116,13 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div style={{ minHeight: '100vh', background: '#09090b' }} />}>
+      <LoginPageInner />
+    </Suspense>
   );
 }

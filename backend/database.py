@@ -1,22 +1,27 @@
-import os
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
-SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./resiliocheck.db")
+from backend import settings
 
-connect_args = {}
-if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
-    connect_args = {"check_same_thread": False}
+SQLALCHEMY_DATABASE_URL = settings.DATABASE_URL
+
+# Heroku / Render style URLs use the deprecated "postgres://" scheme.
 if SQLALCHEMY_DATABASE_URL.startswith("postgres://"):
     SQLALCHEMY_DATABASE_URL = SQLALCHEMY_DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args=connect_args
-)
+connect_args: dict = {}
+engine_kwargs: dict = {"pool_pre_ping": True}
+if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
+    connect_args = {"check_same_thread": False}
+    engine_kwargs = {}
+
+engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args=connect_args, **engine_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-Base = declarative_base()
+
+class Base(DeclarativeBase):
+    pass
+
 
 # Dependency
 def get_db():

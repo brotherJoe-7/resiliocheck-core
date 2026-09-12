@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models import User, AuditLog
@@ -25,27 +26,32 @@ def get_all_users(db: Session = Depends(get_db), _: User = Depends(require_admin
 
 @router.get("/stats")
 def get_platform_stats(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    from backend.models import ScanResult
     total_users = db.query(User).count()
-    total_scans = db.query(User).with_entities(User.scan_count).all()
-    total_scan_count = sum(s[0] for s in total_scans)
+    total_scan_count = db.query(ScanResult).count()
+    blocked_scans = db.query(ScanResult).filter(ScanResult.gate == "BLOCKED").count()
     admin_count = db.query(User).filter(User.role.in_(["admin", "superadmin"])).count()
     return {
         "total_users": total_users,
         "total_scans": total_scan_count,
+        "blocked_scans": blocked_scans,
         "admin_count": admin_count,
     }
 
+class RoleUpdate(BaseModel):
+    role: str
+
+
 @router.post("/users/{user_id}/role")
-def update_user_role(user_id: int, role: str, db: Session = Depends(get_db), current: User = Depends(require_superadmin)):
+def update_user_role(user_id: int, role: str | None = None, body: RoleUpdate | None = None,
+                     db: Session = Depends(get_db), current: User = Depends(require_superadmin)):
+    role = (body.role if body else role) or ""
     if role not in ("user", "admin", "superadmin"):
-        from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Invalid role")
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="User not found")
     if user.id == current.id:
-        from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Cannot change your own role")
     
     old_role = user.role
@@ -54,7 +60,7 @@ def update_user_role(user_id: int, role: str, db: Session = Depends(get_db), cur
     log = AuditLog(
         admin_id=current.id,
         admin_email=current.email,
-        action=f"ROLE_CHANGE",
+        action="ROLE_CHANGE",
         target=f"{user.email} (from {old_role} to {role})"
     )
     db.add(log)
@@ -65,10 +71,8 @@ def update_user_role(user_id: int, role: str, db: Session = Depends(get_db), cur
 def deactivate_user(user_id: int, db: Session = Depends(get_db), current: User = Depends(require_superadmin)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="User not found")
     if user.id == current.id:
-        from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Cannot deactivate your own account")
     
     user.is_active = False
