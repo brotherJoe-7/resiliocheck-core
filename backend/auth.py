@@ -1,21 +1,32 @@
-import os
+import logging
+import secrets as _secrets
 import jwt
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 import bcrypt
 from pydantic import BaseModel, EmailStr, Field
+from backend import settings
 from backend.database import get_db
 from backend.models import User
 
-SECRET_KEY = os.getenv("JWT_SECRET_KEY")
-if not SECRET_KEY:
-    raise RuntimeError("JWT_SECRET_KEY is required in production environment.")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_HOURS = 24
+log = logging.getLogger("resiliocheck.auth")
 
-bearer_scheme = HTTPBearer()
+SECRET_KEY = settings.JWT_SECRET_KEY
+if not SECRET_KEY:
+    if settings.IS_PRODUCTION:
+        raise RuntimeError(
+            "JWT_SECRET_KEY is required in production. "
+            "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+        )
+    # Development convenience: ephemeral key (tokens are invalidated on restart).
+    SECRET_KEY = _secrets.token_hex(32)
+    log.warning("JWT_SECRET_KEY not set — using an ephemeral development key. Set it in .env for persistent sessions.")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_HOURS = settings.ACCESS_TOKEN_EXPIRE_HOURS
+
+bearer_scheme = HTTPBearer(auto_error=False)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
@@ -25,7 +36,10 @@ def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return bcrypt.checkpw(plain.encode(), hashed.encode())
+    try:
+        return bcrypt.checkpw(plain.encode(), hashed.encode())
+    except ValueError:
+        return False
 
 def create_access_token(data: dict) -> str:
     payload = data.copy()
@@ -44,9 +58,15 @@ def decode_token(token: str) -> dict:
 # ── Dependency: get current user from bearer token ───────────────────────────
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: Session = Depends(get_db),
 ) -> User:
+    if credentials is None or not credentials.credentials:
+        raise HTTPException(
+            status_code=401,
+            detail="Not authenticated. Please sign in.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     payload = decode_token(credentials.credentials)
     user = db.query(User).filter(User.email == payload.get("sub")).first()
     if not user or not user.is_active:
@@ -73,20 +93,20 @@ class RegisterRequest(BaseModel):
     full_name: str = ""
 
 class LoginRequest(BaseModel):
-    email: str
-    password: str
+    email: EmailStr
+    password: str = Field(..., min_length=1, max_length=256)
 
 
 # ── Routes ───────────────────────────────────────────────────────────────────
 
 @router.post("/register")
 def register(req: RegisterRequest, db: Session = Depends(get_db)):
-    if db.query(User).filter(User.email == req.email).first():
+    if db.query(User).filter(User.email == req.email.lower()).first():
         raise HTTPException(status_code=400, detail="Email already registered")
     # First user becomes superadmin automatically
     is_first = db.query(User).count() == 0
     user = User(
-        email=req.email,
+        email=req.email.lower(),
         hashed_password=hash_password(req.password),
         full_name=req.full_name,
         role="superadmin" if is_first else "user",
@@ -99,9 +119,11 @@ def register(req: RegisterRequest, db: Session = Depends(get_db)):
 
 @router.post("/login")
 def login(req: LoginRequest, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == req.email).first()
+    user = db.query(User).filter(User.email == req.email.lower()).first()
     if not user or not verify_password(req.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Account is deactivated")
     user.last_login = datetime.now(timezone.utc)
     db.commit()
     token = create_access_token({"sub": user.email, "role": user.role})

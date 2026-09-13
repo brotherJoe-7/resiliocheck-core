@@ -1,0 +1,15 @@
+.git
+.github
+frontend
+node_modules
+tests
+*.db
+*.sqlite3
+.env
+.env.*
+!.env.example
+tmp_workspace*
+__pycache__
+*.pyc
+.pytest_cache
+*.log

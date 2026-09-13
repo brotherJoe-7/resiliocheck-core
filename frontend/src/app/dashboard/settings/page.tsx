@@ -1,42 +1,44 @@
 'use client';
-import { fetchApi } from '@/app/utils/apiClient';
+import { apiJson } from '@/app/utils/apiClient';
+import type { Settings } from '@/app/types';
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import Sidebar from '../../components/Sidebar';
 
 export default function SettingsPage() {
   const { user } = useAuth();
-  const [settings, setSettings] = useState<any>(null);
+  const [settings, setSettings] = useState<Settings | null>(null);
   const [workspace, setWorkspace] = useState('');
   const [timezone, setTimezone] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
 
+  const [loadError, setLoadError] = useState('');
+
   useEffect(() => {
-    fetchApi('/api/settings')
-      .then(res => res.json())
+    apiJson<Settings>('/api/settings')
       .then(data => {
         setSettings(data);
-        setWorkspace(data.workspace);
-        setTimezone(data.timezone);
+        setWorkspace(data.workspace || '');
+        setTimezone(data.timezone || '');
         setLoading(false);
       })
-      .catch(err => console.error(err));
+      .catch(err => { setLoadError(err instanceof Error ? err.message : 'Failed to load settings.'); setLoading(false); });
   }, []);
 
   async function handleSave() {
     setSaving(true);
     setMessage('');
     try {
-      await fetchApi('/api/settings', {
+      await apiJson('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workspace, timezone })
       });
       setMessage('Settings saved successfully.');
     } catch (err) {
-      setMessage('Failed to save settings.');
+      setMessage(err instanceof Error ? `Failed to save: ${err.message}` : 'Failed to save settings.');
     }
     setSaving(false);
     setTimeout(() => setMessage(''), 3000);
@@ -53,7 +55,9 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {loading || !settings ? (
+        {loadError ? (
+          <div style={{ color: 'var(--red)' }}>{loadError}</div>
+        ) : loading || !settings ? (
           <div style={{ color: 'var(--text-muted)' }}>Loading settings...</div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 24, alignItems: 'flex-start' }}>
@@ -121,9 +125,9 @@ export default function SettingsPage() {
 
               {(user?.role === 'admin' || user?.role === 'superadmin') && (
                 <div className="rc-card">
-                  <div style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 16 }}>Team Members ({settings.team.length})</div>
+                  <div style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 16 }}>Team Members ({(settings.team || []).length})</div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    {settings.team.map((m: any) => (
+                    {(settings.team || []).map((m) => (
                       <div key={m.email} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>
                         <div>
                           <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>{m.name}</div>

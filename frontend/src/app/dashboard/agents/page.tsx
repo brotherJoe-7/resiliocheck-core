@@ -1,28 +1,31 @@
 'use client';
-import { fetchApi } from '@/app/utils/apiClient';
+import { apiJson } from '@/app/utils/apiClient';
+import type { Agent } from '@/app/types';
 import { useState, useEffect } from 'react';
 import Sidebar from '../../components/Sidebar';
 
 export default function AgentsPage() {
-  const [agents, setAgents] = useState<any[]>([]);
+  const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const [loadError, setLoadError] = useState('');
+
   useEffect(() => {
-    fetchApi('/api/agents')
-      .then(res => res.json())
-      .then(data => { setAgents(data); setLoading(false); })
-      .catch(err => console.error(err));
+    apiJson<Agent[]>('/api/agents')
+      .then(data => { setAgents(Array.isArray(data) ? data : []); setLoading(false); })
+      .catch(err => { setLoadError(err instanceof Error ? err.message : 'Failed to load agents.'); setLoading(false); });
   }, []);
 
   async function toggle(id: string) {
+    const prev = agents;
     // Optimistic update
     setAgents(a => a.map(ag => ag.id === id ? { ...ag, active: !ag.active, statusLabel: !ag.active ? 'Working' : 'Idle', statusColor: !ag.active ? 'var(--green)' : 'var(--text-muted)' } : ag));
-    
-    // Server sync
     try {
-      await fetchApi(`/api/agents/${id}/toggle`, { method: 'POST' });
+      const data = await apiJson<{ agent: Agent }>(`/api/agents/${id}/toggle`, { method: 'POST' });
+      setAgents(a => a.map(ag => ag.id === id ? data.agent : ag));
     } catch (err) {
       console.error(err);
+      setAgents(prev);
     }
   }
 
@@ -40,8 +43,10 @@ export default function AgentsPage() {
 
         {loading ? (
           <div style={{ color: 'var(--text-muted)' }}>Loading agents...</div>
+        ) : loadError ? (
+          <div style={{ color: 'var(--red)' }}>{loadError}</div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 20 }}>
             {agents.map(agent => (
               <div key={agent.id} className="rc-card" style={{ opacity: agent.active ? 1 : 0.65, transition: 'opacity 0.3s' }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
@@ -63,7 +68,7 @@ export default function AgentsPage() {
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
-                  {agent.stats.map((s: any) => (
+                  {(agent.stats || []).map((s) => (
                     <div key={s.label}>
                       <div style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: 4 }}>{s.label}</div>
                       <div style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--text-primary)' }}>{s.value}</div>

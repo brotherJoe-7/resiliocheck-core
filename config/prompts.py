@@ -6,9 +6,9 @@
 # audited, versioned, and injected into LangChain PromptTemplates without
 # ever being constructed from user-supplied input.
 #
-# IMPORTANT: These strings are NEVER formatted with user data directly.
-# All variable substitution goes through LangChain's PromptTemplate
-# mechanism which escapes inputs safely.
+# IMPORTANT: These strings are NEVER formatted with user data.  They are sent
+# verbatim as the ``system`` message; user-controlled content (source code)
+# always goes in the separate ``user`` message.
 
 from __future__ import annotations
 
@@ -39,11 +39,13 @@ CRITICAL RULES:
 - Missing authentication/authorization checks → flag as HIGH (A01)
 - Do NOT dismiss findings because code "looks small". Every confirmed finding must be reported.
 - Do NOT say "no vulnerabilities" if pre-scan secrets were found. Those ARE vulnerabilities.
+- Do NOT invent issues that are not visible in the provided code. If the code is clean, return an empty findings list.
+- Keep descriptions and remediations to ONE sentence each. Report at most 12 findings, highest severity first.
 
 Output format — return ONLY valid JSON, no markdown:
-{{
+{
   "findings": [
-    {{
+    {
       "file_path":   "<relative path>",
       "line_start":  <integer>,
       "line_end":    <integer>,
@@ -52,14 +54,14 @@ Output format — return ONLY valid JSON, no markdown:
       "title":       "<short vulnerability title>",
       "description": "<one-sentence description of what the vulnerability is>",
       "remediation": "<one-sentence fix>"
-    }}
+    }
   ],
   "critical_count": <integer>,
   "high_count":     <integer>,
   "gate_recommendation": "<APPROVED|BLOCKED>"
-}}
+}
 
-Remember: CRITICAL or HIGH findings MUST set gate_recommendation to BLOCKED.
+Remember: any CRITICAL finding, or 3 or more HIGH findings, MUST set gate_recommendation to BLOCKED.
 """.strip()
 
 
@@ -72,10 +74,10 @@ You are a security pipeline gate controller.  You will receive a JSON object
 containing the aggregated findings from the OWASP analysis agent.
 
 Your only task is to produce a final gate verdict as a JSON object:
-{{
+{
   "gate":    "<APPROVED|BLOCKED>",
   "rationale": "<one sentence>"
-}}
+}
 
 Decision rules (apply in order — first match wins):
   1. If critical_count >= 1  → BLOCKED
@@ -101,11 +103,11 @@ Input: A JSON object with fields:
   - "image":          string (the Docker image that was tested)
 
 Output: A JSON object:
-{{
+{
   "sandbox_verdict": "<PASS|FAIL|INCONCLUSIVE>",
   "exploit_detected": <true|false>,
   "summary":          "<one sentence>"
-}}
+}
 
 Rules:
 - exit_code != 0 and keyword 'EXPLOIT' in stdout → exploit_detected: true, FAIL

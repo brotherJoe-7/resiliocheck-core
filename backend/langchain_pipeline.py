@@ -1,393 +1,769 @@
 """
 backend/langchain_pipeline.py
 ==============================
-ResilioCheck AI — LangChain Multi-Agent Security Pipeline
+ResilioCheck AI — Multi-Agent Security Pipeline (Groq-backed)
 
-Implements a three-step sequential analysis chain using the prompts defined
-in config/prompts.py:
+Three sequential agents, each with a small focused prompt so a single scan
+fits inside the Groq free-tier budget (8 000 tokens / minute per model):
 
-  Step 1 — OWASP Agent   : Classifies vulnerabilities per file, returns findings[]
-  Step 2 — Gate Agent    : Decides APPROVED/BLOCKED based on severity counts
-  Step 3 — Patch Agent   : Generates targeted fix for the highest-severity finding
+  Step 1 — OWASP Agent : classifies vulnerabilities per file  -> findings[]
+  Step 2 — Gate Agent  : APPROVED / BLOCKED from severity counts (deterministic
+                          by default, optional LLM confirmation)
+  Step 3 — Patch Agent : full corrected file for the worst finding (only when
+                          the file is small enough to patch safely)
 
-Each step sends a small, focused prompt so we never exceed the Groq TPM limit.
+Resilience features
+-------------------
+* Rate-limit aware: honours the ``retry-after`` header, but if the wait is
+  long it immediately switches to the next model in the chain (Groq limits
+  are enforced per model, so this keeps the scan going instead of failing).
+* Model fallback: decommissioned / unknown models (404, 400 "model ...")
+  are skipped automatically.
+* Hard time budget: the pipeline never waits longer than
+  ``LLM_MAX_TOTAL_WAIT_SECONDS`` for rate limits — it raises a clean,
+  human-readable ``PipelineError`` instead of a ``RetryError[...]``.
+* Payload guard: source context is trimmed to fit the TPM budget and on a
+  413 / "request too large" response the payload is halved and retried.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
+import time
+from dataclasses import dataclass, field
+from typing import Callable
 
 import requests
-from dotenv import load_dotenv
 
-from config.prompts import (
-    OWASP_SYSTEM_PROMPT,
-    GATE_DECISION_SYSTEM_PROMPT,
-)
+from backend import settings
+from config.prompts import GATE_DECISION_SYSTEM_PROMPT, OWASP_SYSTEM_PROMPT
 
-load_dotenv()
+log = logging.getLogger("resiliocheck.pipeline")
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL   = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
-GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
+# Backwards-compatible module constants
+GROQ_API_KEY = settings.GROQ_API_KEY
+GROQ_MODEL   = settings.GROQ_MODEL
+GROQ_URL     = settings.GROQ_URL
+
+SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+VALID_SEVERITIES = set(SEVERITY_ORDER)
+
+DEFAULT_MODEL_CHAIN: list[str] = settings.resolve_model_chain(None)
+
 
 # ---------------------------------------------------------------------------
-# Internal helpers
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
+# Errors
+# ---------------------------------------------------------------------------
 
-class _TransientGroqError(Exception):
-    """Raised only for 429/503 so tenacity knows to retry."""
-
-def _is_transient(e: Exception) -> bool:
-    return isinstance(e, _TransientGroqError)
-
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=8), retry=retry_if_exception(_is_transient))
-def _call_groq(system: str, user: str, temperature: float = 0.0) -> str:
+class PipelineError(Exception):
     """
-    Single Groq API call. Returns the raw text content from the model.
-    Only retries on 429 (rate-limit) and 503 (service unavailable).
-    Raises RuntimeError immediately on permanent errors (404, 401, 400).
+    Raised for any *expected* failure of the AI pipeline.  ``detail`` is safe
+    to show to the end user; ``status_code`` is the HTTP status the API layer
+    should return.
     """
-    if not GROQ_API_KEY:
-        raise RuntimeError("GROQ_API_KEY environment variable is not set.")
 
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type":  "application/json",
-    }
-    payload = {
-        "model":       GROQ_MODEL,
-        "messages":    [
-            {"role": "system", "content": system},
-            {"role": "user",   "content": user},
-        ],
-        "temperature": temperature,
-    }
+    def __init__(self, detail: str, status_code: int = 502):
+        super().__init__(detail)
+        self.detail = detail
+        self.status_code = status_code
 
-    print(f"[Groq] Calling model: {GROQ_MODEL}")
-    resp = requests.post(GROQ_URL, headers=headers, json=payload, timeout=60)
 
-    if not resp.ok:
+class GroqAuthError(PipelineError):
+    def __init__(self, detail: str):
+        super().__init__(detail, status_code=500)
+
+
+class GroqRateLimitError(PipelineError):
+    def __init__(self, detail: str):
+        super().__init__(detail, status_code=429)
+
+
+class GroqPayloadTooLarge(PipelineError):
+    def __init__(self, detail: str):
+        super().__init__(detail, status_code=413)
+
+
+class GroqModelUnavailable(PipelineError):
+    """All models in the chain were rejected (404 / decommissioned / exhausted)."""
+
+
+# ---------------------------------------------------------------------------
+# Token helpers
+# ---------------------------------------------------------------------------
+
+def estimate_tokens(text: str) -> int:
+    """Cheap, conservative token estimate (~3.5 chars per token for code)."""
+    return int(len(text) / 3.5) + 8
+
+
+def _parse_retry_after(resp: requests.Response, default: float = 5.0) -> float:
+    """
+    Groq sets ``retry-after`` (seconds) on 429.  It also always sends
+    ``x-ratelimit-reset-tokens`` like ``7.66s`` or ``2m59.56s``.
+    """
+    ra = resp.headers.get("retry-after")
+    if ra:
         try:
-            err_body = resp.json()
-            err_msg  = err_body.get("error", {}).get("message", resp.text[:400])
+            return max(0.5, float(ra))
+        except ValueError:
+            pass
+    reset = resp.headers.get("x-ratelimit-reset-tokens") or resp.headers.get("x-ratelimit-reset-requests")
+    if reset:
+        m = re.fullmatch(r"(?:(\d+)h)?(?:(\d+)m)?(?:([\d.]+)s)?", reset.strip())
+        if m and (m.group(1) or m.group(2) or m.group(3)):
+            hours = float(m.group(1) or 0)
+            mins = float(m.group(2) or 0)
+            secs = float(m.group(3) or 0)
+            return max(0.5, hours * 3600 + mins * 60 + secs)
+    return default
+
+
+# ---------------------------------------------------------------------------
+# Groq client
+# ---------------------------------------------------------------------------
+
+_MODEL_GONE_HINTS = ("decommission", "not exist", "not found", "no longer supported",
+                     "does not support", "unsupported", "invalid model", "deprecated")
+_TOO_LARGE_HINTS = ("too large", "reduce the length", "reduce your", "context length",
+                    "maximum context", "tokens per minute", "tpm")
+
+
+@dataclass
+class GroqClient:
+    """
+    Thin, dependency-free Groq chat client with model fallback and a shared
+    wait budget across all calls made during one scan.
+    """
+    api_key: str = field(default_factory=lambda: settings.GROQ_API_KEY)
+    models: list[str] = field(default_factory=lambda: list(DEFAULT_MODEL_CHAIN))
+    max_total_wait: float = field(default_factory=lambda: float(settings.LLM_MAX_TOTAL_WAIT_SECONDS))
+    request_timeout: float = field(default_factory=lambda: float(settings.LLM_REQUEST_TIMEOUT_SECONDS))
+    tpm_budget: int = field(default_factory=lambda: settings.LLM_TPM_BUDGET)
+    # Injectable for tests
+    # Resolved lazily so tests can monkeypatch ``requests.post`` / ``time.sleep``
+    post: Callable[..., requests.Response] | None = field(default=None, repr=False)
+    sleep: Callable[[float], None] | None = field(default=None, repr=False)
+
+    # runtime state
+    waited: float = 0.0
+    last_model: str = ""
+    dead_models: set = field(default_factory=set)
+    calls: int = 0
+
+    # -- public -------------------------------------------------------------
+
+    def chat(self, system: str, user: str, *, temperature: float = 0.0,
+             max_tokens: int | None = None, json_mode: bool = False) -> str:
+        if not self.api_key:
+            raise GroqAuthError(
+                "GROQ_API_KEY is not configured on the server. "
+                "Set it in the backend environment (Cloud Run → Variables) and redeploy."
+            )
+
+        max_tokens = max_tokens or settings.LLM_MAX_OUTPUT_TOKENS
+        prompt_tokens = estimate_tokens(system) + estimate_tokens(user)
+        if prompt_tokens + max_tokens > self.tpm_budget:
+            max_tokens = max(256, self.tpm_budget - prompt_tokens - 64)
+            if prompt_tokens + max_tokens > self.tpm_budget:
+                raise GroqPayloadTooLarge(
+                    f"Prompt is too large for the per-minute token budget "
+                    f"({prompt_tokens} prompt tokens, budget {self.tpm_budget})."
+                )
+
+        payload: dict = {
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user",   "content": user},
+            ],
+            "temperature": temperature,
+            "max_tokens":  max_tokens,
+        }
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
+
+        last_error = ""
+        while True:
+            live_models = [m for m in self.models if m not in self.dead_models]
+            if not live_models:
+                raise GroqModelUnavailable(
+                    "All configured Groq models were rejected or exhausted. "
+                    f"Tried: {', '.join(self.models)}. Last error: {last_error or 'n/a'}"
+                )
+
+            min_wait: float | None = None
+            for model in live_models:
+                payload["model"] = model
+                if json_mode:
+                    payload["response_format"] = {"type": "json_object"}
+                resp = self._post(payload)
+                if resp is None:
+                    last_error = f"{model}: network error"
+                    min_wait = 3.0 if min_wait is None else min(min_wait, 3.0)
+                    continue
+
+                if resp.ok:
+                    self.last_model = model
+                    return self._extract_content(resp, model)
+
+                status = resp.status_code
+                err_msg = self._error_message(resp)
+                lowered = err_msg.lower()
+                last_error = f"{model}: HTTP {status} — {err_msg}"
+
+                if status in (401, 403):
+                    raise GroqAuthError(
+                        f"Groq rejected the API key ({status}): {err_msg}. "
+                        "Verify GROQ_API_KEY in the backend environment."
+                    )
+
+                if status == 404 or (status == 400 and "model" in lowered
+                                     and any(h in lowered for h in _MODEL_GONE_HINTS)):
+                    log.warning("[Groq] model %s unavailable (%s): %s — trying next", model, status, err_msg)
+                    self.dead_models.add(model)
+                    continue
+
+                if status == 400 and json_mode and "response_format" in lowered:
+                    log.info("[Groq] %s does not support json_mode; retrying without", model)
+                    payload.pop("response_format", None)
+                    json_mode = False
+                    resp = self._post(payload)
+                    if resp is None:
+                        continue
+                    if resp.ok:
+                        self.last_model = model
+                        return self._extract_content(resp, model)
+                    status = resp.status_code
+                    err_msg = self._error_message(resp)
+                    lowered = err_msg.lower()
+                    last_error = f"{model}: HTTP {status} — {err_msg}"
+
+                if status == 413 or (status == 400 and any(h in lowered for h in _TOO_LARGE_HINTS)):
+                    raise GroqPayloadTooLarge(f"Groq {status}: {err_msg}")
+
+                if status == 429:
+                    wait = _parse_retry_after(resp)
+                    if "per day" in lowered or "tpd" in lowered or "rpd" in lowered or wait > 600:
+                        log.warning("[Groq] daily quota exhausted on %s; skipping model", model)
+                        self.dead_models.add(model)
+                        continue
+                    if "too large" in lowered or "tokens per minute" in lowered and "request" in lowered:
+                        # A single request bigger than the TPM cap will never succeed.
+                        raise GroqPayloadTooLarge(f"Groq 429: {err_msg}")
+                    log.warning("[Groq] %s rate-limited (retry-after≈%.1fs): %s", model, wait, err_msg)
+                    min_wait = wait if min_wait is None else min(min_wait, wait)
+                    continue  # hop to next model
+
+                if status in (498, 500, 502, 503, 504):
+                    log.warning("[Groq] %s transient %s: %s", model, status, err_msg)
+                    min_wait = 3.0 if min_wait is None else min(min_wait, 3.0)
+                    continue
+
+                raise PipelineError(f"Groq API error {status} on model '{model}': {err_msg}", status_code=502)
+
+            # One full pass over the chain without success -> wait, then retry.
+            if not [m for m in self.models if m not in self.dead_models]:
+                continue  # loop head raises GroqModelUnavailable
+            wait = min(min_wait if min_wait is not None else 3.0, 60.0)
+            if self.waited + wait > self.max_total_wait:
+                raise GroqRateLimitError(
+                    "Groq rate limit reached on every configured model and the wait "
+                    f"budget ({int(self.max_total_wait)}s) is exhausted. Please retry in about "
+                    f"{int(wait) or 1} second(s). Last response: {last_error}"
+                )
+            log.info("[Groq] all models rate-limited; sleeping %.1fs (total waited %.1fs)", wait, self.waited)
+            (self.sleep or time.sleep)(wait)
+            self.waited += wait
+
+    # -- helpers ------------------------------------------------------------
+
+    def _post(self, payload: dict) -> requests.Response | None:
+        self.calls += 1
+        log.info("[Groq] call #%d model=%s max_tokens=%s", self.calls, payload.get("model"), payload.get("max_tokens"))
+        try:
+            return (self.post or requests.post)(
+                settings.GROQ_URL,
+                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+                json=payload,
+                timeout=self.request_timeout,
+            )
+        except requests.RequestException as exc:
+            log.warning("[Groq] network error on %s: %s", payload.get("model"), exc)
+            return None
+
+    @staticmethod
+    def _error_message(resp: requests.Response) -> str:
+        try:
+            body = resp.json()
+            err = body.get("error", body) if isinstance(body, dict) else body
+            if isinstance(err, dict):
+                return str(err.get("message") or err)[:400]
+            return str(err)[:400]
         except Exception:
-            err_msg = resp.text[:400]
+            return (resp.text or "")[:400]
 
-        # Only retry on rate-limit and transient server errors
-        if resp.status_code in (429, 503):
-            raise _TransientGroqError(f"Groq {resp.status_code}: {err_msg}")
+    @staticmethod
+    def _extract_content(resp: requests.Response, model: str) -> str:
+        try:
+            data = resp.json()
+        except ValueError:
+            raise PipelineError(f"Groq returned a non-JSON body from model '{model}'.")
+        choices = data.get("choices") or []
+        if not choices:
+            failed = (data.get("error") or {}).get("failed_generation", "")
+            if failed:
+                return str(failed).strip()
+            raise PipelineError(f"Groq returned no choices from model '{model}'.")
+        message = choices[0].get("message") or {}
+        content = message.get("content") or ""
+        if not content and message.get("reasoning"):
+            content = message["reasoning"]
+        return str(content).strip()
 
-        # Permanent error — raise immediately (do NOT retry)
-        raise RuntimeError(
-            f"Groq API error {resp.status_code} using model '{GROQ_MODEL}': {err_msg}. "
-            f"Check that GROQ_MODEL is set correctly in Cloud Run environment variables."
-        )
 
-    data    = resp.json()
-    choices = data.get("choices") or []
-    content = (choices[0].get("message") or {}).get("content", "") if choices else ""
-    return content.strip()
-
-
+# ---------------------------------------------------------------------------
+# Parsing helpers
+# ---------------------------------------------------------------------------
 
 def _parse_json(raw: str, fallback: dict) -> dict:
     """
-    Robustly parse JSON from a model response.
-    Strips markdown fences, extracts first {...} block as fallback.
+    Robustly parse JSON from a model response: strips <think> blocks and
+    markdown fences, then falls back to the first balanced {...} object.
     """
-    # Strip markdown fences
-    cleaned = re.sub(r"```(?:json)?\s*", "", raw).strip().rstrip("`").strip()
+    if not raw:
+        return dict(fallback)
+    cleaned = re.sub(r"<think>[\s\S]*?</think>", "", raw)
+    cleaned = re.sub(r"```(?:json|JSON)?\s*", "", cleaned).strip().rstrip("`").strip()
     try:
-        return json.loads(cleaned)
+        parsed = json.loads(cleaned)
+        return parsed if isinstance(parsed, dict) else dict(fallback)
     except json.JSONDecodeError:
         pass
-    # Try extracting first {...} block
-    match = re.search(r"\{[\s\S]*\}", cleaned)
-    if match:
+    start = cleaned.find("{")
+    if start != -1:
+        depth = 0
+        in_str = False
+        esc = False
+        for i in range(start, len(cleaned)):
+            ch = cleaned[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+                continue
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        parsed = json.loads(cleaned[start:i + 1])
+                        if isinstance(parsed, dict):
+                            return parsed
+                    except json.JSONDecodeError:
+                        pass
+                    break
+    return dict(fallback)
+
+
+def _strip_code_fences(text: str) -> str:
+    text = (text or "").strip()
+    if not text:
+        return ""
+    m = re.match(r"^```[\w+.-]*[ \t]*\n([\s\S]*?)\n?```\s*$", text)
+    if m:
+        return m.group(1).rstrip() + "\n"
+    text = re.sub(r"^```[\w+.-]*[ \t]*\n?", "", text)
+    text = re.sub(r"\n?```\s*$", "", text)
+    return text.rstrip() + "\n"
+
+
+def normalize_findings(raw_findings, known_files: list[str] | None = None) -> list[dict]:
+    """Coerce whatever the model returned into a clean list of finding dicts."""
+    out: list[dict] = []
+    if not isinstance(raw_findings, list):
+        return out
+
+    def _int(v, default=0):
         try:
-            return json.loads(match.group(0))
-        except json.JSONDecodeError:
-            pass
-    return fallback
+            return int(v)
+        except (TypeError, ValueError):
+            return default
+
+    for f in raw_findings:
+        if not isinstance(f, dict):
+            continue
+        sev = str(f.get("severity", "INFO")).strip().upper()
+        if sev not in VALID_SEVERITIES:
+            sev = "MEDIUM" if sev in ("MODERATE", "WARNING", "WARN") else "INFO"
+        file_path = str(f.get("file_path") or f.get("file") or "unknown").strip().replace("\\", "/")
+        if known_files and file_path not in known_files:
+            base = os.path.basename(file_path)
+            matches = [k for k in known_files if os.path.basename(k) == base]
+            if len(matches) == 1:
+                file_path = matches[0]
+        line_start = _int(f.get("line_start"), 0)
+        out.append({
+            "file_path":   file_path,
+            "line_start":  line_start,
+            "line_end":    _int(f.get("line_end"), line_start),
+            "owasp_class": str(f.get("owasp_class") or f.get("category") or "Uncategorised")[:120],
+            "severity":    sev,
+            "title":       str(f.get("title") or f.get("owasp_class") or "Security finding")[:160],
+            "description": str(f.get("description") or "")[:600],
+            "remediation": str(f.get("remediation") or "")[:600],
+        })
+    out.sort(key=lambda x: SEVERITY_ORDER.get(x["severity"], 4))
+    return out
+
+
+def count_severities(findings: list[dict]) -> tuple[int, int]:
+    critical = sum(1 for f in findings if f.get("severity") == "CRITICAL")
+    high     = sum(1 for f in findings if f.get("severity") == "HIGH")
+    return critical, high
+
+
+def decide_gate(critical: int, high: int) -> tuple[str, str]:
+    """Deterministic gate policy — mirrors GATE_DECISION_SYSTEM_PROMPT."""
+    if critical >= 1:
+        return "BLOCKED", f"{critical} critical finding(s) detected — policy requires zero critical issues."
+    if high >= 3:
+        return "BLOCKED", f"{high} high-severity findings detected — policy threshold is 3."
+    if high:
+        return "APPROVED", f"{high} high-severity finding(s) below the blocking threshold of 3; no critical issues."
+    return "APPROVED", "No critical or high severity findings detected."
 
 
 # ---------------------------------------------------------------------------
-# Pipeline steps
+# Payload builder
 # ---------------------------------------------------------------------------
 
-def run_owasp_agent(source_files: dict, secret_findings: list) -> dict:
-    """
-    Step 1: OWASP Triage Agent.
-    Packs source files into a compact JSON payload and asks the model to
-    classify vulnerabilities. Returns a findings dict with:
-      { findings[], critical_count, high_count, gate_recommendation }
-    """
-    print("[Pipeline] Step 1: OWASP Agent — classifying vulnerabilities...")
-
-    # Build a compact source code context
-    MAX_CHARS  = 25_000
-    code_parts = []
-    used       = 0
-    for filepath, content in source_files.items():
-        fname   = os.path.basename(filepath)
-        snippet = content[:1500]          # max 1500 chars per file
-        entry   = f"=== {fname} ===\n{snippet}\n"
-        if used + len(entry) > MAX_CHARS:
-            break
-        code_parts.append(entry)
+def _build_code_context(source_files: dict, max_chars: int, per_file: int) -> tuple[str, list[str]]:
+    parts: list[str] = []
+    included: list[str] = []
+    used = 0
+    for path, content in source_files.items():
+        snippet = content if len(content) <= per_file else content[:per_file] + "\n... [truncated]"
+        entry = f"=== {path} ===\n{snippet}\n"
+        if used + len(entry) > max_chars:
+            if parts:
+                break
+            entry = entry[:max_chars]  # always include at least one file
+        parts.append(entry)
+        included.append(path)
         used += len(entry)
+    return "".join(parts), included
+
+
+# ---------------------------------------------------------------------------
+# Agents
+# ---------------------------------------------------------------------------
+
+def run_owasp_agent(client: GroqClient, source_files: dict, secret_findings: list) -> dict:
+    """Step 1: OWASP Triage Agent."""
+    log.info("[Pipeline] Step 1: OWASP Agent — classifying vulnerabilities in %d file(s)", len(source_files))
 
     secret_text = ""
     if secret_findings:
-        lines       = [f"  [{f['pattern']}] {f['file']}:{f['line']}: {f['snippet']}"
-                       for f in secret_findings[:5]]
-        secret_text = "\nPRE-SCAN SECRETS DETECTED:\n" + "\n".join(lines) + "\n"
+        lines = [f"  [{f.get('pattern')}] {f.get('file')}:{f.get('line')}: {str(f.get('snippet', ''))[:100]}"
+                 for f in secret_findings[:6]]
+        secret_text = "\nPRE-SCAN SECRETS DETECTED (these are confirmed findings):\n" + "\n".join(lines) + "\n"
 
-    user_msg = (
-        "Analyse the following source code for OWASP Top 10 vulnerabilities.\n"
-        + secret_text
-        + "\nSOURCE CODE:\n"
-        + "".join(code_parts)
-    )
-
-    raw = _call_groq(OWASP_SYSTEM_PROMPT, user_msg)
-    print(f"[Pipeline] OWASP Agent raw response ({len(raw)} chars)")
-
-    fallback = {
-        "findings": [],
-        "critical_count": 0,
-        "high_count": 0,
-        "gate_recommendation": "APPROVED",
-    }
-    result = _parse_json(raw, fallback)
-
-    # Ensure required keys exist
-    result.setdefault("findings", [])
-    result.setdefault("critical_count", 0)
-    result.setdefault("high_count", 0)
-    result.setdefault("gate_recommendation", "APPROVED")
-    return result
-
-
-def run_gate_agent(owasp_result: dict) -> dict:
-    """
-    Step 2: Gate Decision Agent.
-    Receives the OWASP findings summary and returns:
-      { gate: "APPROVED|BLOCKED", rationale: str }
-    """
-    print("[Pipeline] Step 2: Gate Agent — deciding APPROVED/BLOCKED...")
-
-    user_msg = json.dumps({
-        "critical_count":      owasp_result.get("critical_count", 0),
-        "high_count":          owasp_result.get("high_count", 0),
-        "gate_recommendation": owasp_result.get("gate_recommendation", "APPROVED"),
-        "findings_count":      len(owasp_result.get("findings", [])),
-    })
-
-    raw    = _call_groq(GATE_DECISION_SYSTEM_PROMPT, user_msg)
-    print(f"[Pipeline] Gate Agent raw response ({len(raw)} chars)")
-
-    fallback = {"gate": "APPROVED", "rationale": "No critical issues detected."}
-    result   = _parse_json(raw, fallback)
-    result.setdefault("gate", "APPROVED")
-    result.setdefault("rationale", "")
-    return result
-
-
-def run_patch_agent(owasp_result: dict, source_files: dict) -> tuple[str, str]:
-    """
-    Step 3: Patch Generator.
-    Targets the highest-severity finding and generates a corrected code snippet.
-    Returns a tuple of (patched_code, target_filename).
-    """
-    findings = owasp_result.get("findings", [])
-    # Sort by severity
-    severity_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
-    findings_sorted = sorted(
-        findings,
-        key=lambda f: severity_order.get(f.get("severity", "INFO"), 4),
-    )
-
-    if not findings_sorted:
-        print("[Pipeline] Step 3: Patch Agent — no findings to patch, skipping.")
-        return ""
-
-    worst = findings_sorted[0]
-    print(f"[Pipeline] Step 3: Patch Agent — generating fix for {worst.get('severity')} issue in {worst.get('file_path', 'unknown')}")
-
-    # Find the relevant file content
-    target_file  = worst.get("file_path", "")
-    file_content = ""
-    for fp, content in source_files.items():
-        if os.path.basename(fp) == os.path.basename(target_file):
-            file_content = content[:3000]
+    max_chars = settings.LLM_MAX_CONTEXT_CHARS
+    per_file  = settings.LLM_MAX_CHARS_PER_FILE
+    attempts  = 0
+    while True:
+        attempts += 1
+        code_ctx, included = _build_code_context(source_files, max_chars, per_file)
+        user_msg = (
+            "Analyse the following source code for OWASP Top 10 vulnerabilities. "
+            "Use the file paths exactly as shown in the === headers for file_path.\n"
+            + secret_text
+            + "\nSOURCE CODE:\n"
+            + code_ctx
+        )
+        try:
+            raw = client.chat(OWASP_SYSTEM_PROMPT, user_msg, temperature=settings.LLM_TEMPERATURE, json_mode=True)
             break
+        except GroqPayloadTooLarge as exc:
+            if attempts >= 3:
+                raise
+            max_chars //= 2
+            per_file = max(400, per_file // 2)
+            log.warning("[Pipeline] payload too large (%s) — shrinking to %d chars", exc.detail, max_chars)
 
-    patch_system = (
-        "You are a secure code patch generator. You will receive a vulnerability description "
-        "and the relevant source code. Generate ONLY the corrected code for the vulnerable section. "
-        "Return ONLY the corrected code as a plain string — no markdown, no explanation, no JSON."
-    )
+    log.info("[Pipeline] OWASP Agent raw response (%d chars) via %s", len(raw), client.last_model)
+
+    fallback = {"findings": [], "critical_count": 0, "high_count": 0, "gate_recommendation": "APPROVED"}
+    parsed = _parse_json(raw, fallback)
+    findings = normalize_findings(parsed.get("findings"), known_files=list(source_files.keys()))
+    critical, high = count_severities(findings)   # never trust the model's arithmetic
+    return {
+        "findings":            findings,
+        "critical_count":      critical,
+        "high_count":          high,
+        "gate_recommendation": "BLOCKED" if (critical or high >= 3) else "APPROVED",
+        "files_analysed":      included,
+        "model":               client.last_model,
+    }
+
+
+def run_gate_agent(client: GroqClient | None, owasp_result: dict) -> dict:
+    """
+    Step 2: Gate Decision.  Deterministic policy first; if GATE_AGENT_MODE=llm
+    the model is asked to confirm and may only make the verdict *stricter*.
+    """
+    critical = int(owasp_result.get("critical_count", 0))
+    high     = int(owasp_result.get("high_count", 0))
+    gate, rationale = decide_gate(critical, high)
+    result = {"gate": gate, "rationale": rationale, "mode": "deterministic"}
+
+    if settings.GATE_AGENT_MODE == "llm" and client is not None:
+        log.info("[Pipeline] Step 2: Gate Agent (LLM confirmation)")
+        user_msg = json.dumps({
+            "critical_count": critical,
+            "high_count": high,
+            "findings_count": len(owasp_result.get("findings", [])),
+            "deterministic_verdict": gate,
+        })
+        try:
+            raw = client.chat(GATE_DECISION_SYSTEM_PROMPT, user_msg, temperature=0.0, max_tokens=200, json_mode=True)
+            llm = _parse_json(raw, {})
+            if str(llm.get("gate", "")).upper() == "BLOCKED" and gate != "BLOCKED":
+                result["gate"] = "BLOCKED"
+                result["rationale"] = str(llm.get("rationale") or rationale)
+            result["mode"] = "llm"
+        except PipelineError as exc:
+            log.warning("[Pipeline] Gate Agent LLM confirmation skipped: %s", exc.detail)
+    else:
+        log.info("[Pipeline] Step 2: Gate Agent — %s (%s)", gate, rationale)
+    return result
+
+
+def _pick_worst_patchable(findings: list[dict], source_files: dict) -> tuple[dict | None, str, str]:
+    """Return (finding, file_path, content) for the worst finding whose file we have."""
+    for f in findings:
+        if f.get("severity") not in ("CRITICAL", "HIGH"):
+            break
+        fp = f.get("file_path", "")
+        content = source_files.get(fp)
+        if content is None:
+            base = os.path.basename(fp)
+            for k, v in source_files.items():
+                if os.path.basename(k) == base:
+                    fp, content = k, v
+                    break
+        if content is None:
+            continue
+        if len(content) > settings.PATCH_MAX_FILE_CHARS:
+            log.info("[Pipeline] %s too large to auto-patch (%d chars)", fp, len(content))
+            continue
+        return f, fp, content
+    return None, "", ""
+
+
+PATCH_SYSTEM_PROMPT = (
+    "You are a senior application-security engineer producing a pull-request-ready fix.\n"
+    "You will receive ONE vulnerability finding and the COMPLETE current contents of the file.\n"
+    "Return the COMPLETE corrected file with the vulnerability fixed. Rules:\n"
+    "- Keep all unrelated code, imports, comments and formatting exactly as they are.\n"
+    "- Do not add explanations, headings or markdown fences — output only the file contents.\n"
+    "- Never introduce placeholder secrets; read credentials from environment variables.\n"
+    "- The result must be syntactically valid in the file's language."
+)
+
+
+def run_patch_agent(client: GroqClient, owasp_result: dict, source_files: dict) -> tuple[str, str]:
+    """Step 3: Patch Generator -> (patched_file_contents, relative_file_path)."""
+    findings = owasp_result.get("findings", [])
+    worst, target, content = _pick_worst_patchable(findings, source_files)
+    if worst is None:
+        log.info("[Pipeline] Step 3: Patch Agent — nothing patchable, skipping.")
+        return "", ""
+
+    log.info("[Pipeline] Step 3: Patch Agent — fixing %s issue in %s", worst.get("severity"), target)
     user_msg = (
-        f"VULNERABILITY:\n"
-        f"  File: {worst.get('file_path')}\n"
+        f"VULNERABILITY\n"
+        f"  File: {target}\n"
         f"  OWASP: {worst.get('owasp_class')}\n"
         f"  Severity: {worst.get('severity')}\n"
+        f"  Lines: {worst.get('line_start')}-{worst.get('line_end')}\n"
         f"  Description: {worst.get('description')}\n"
         f"  Remediation: {worst.get('remediation')}\n\n"
-        f"CURRENT CODE:\n{file_content}\n\n"
-        f"Generate the patched version of the vulnerable code section:"
+        f"CURRENT FILE CONTENTS ({target}):\n{content}\n\n"
+        f"Return the complete corrected file:"
     )
+    out_tokens = min(settings.LLM_MAX_OUTPUT_TOKENS * 2, estimate_tokens(content) + 600)
+    patched = _strip_code_fences(client.chat(PATCH_SYSTEM_PROMPT, user_msg, temperature=0.1, max_tokens=out_tokens))
+    if not patched.strip() or patched.strip() == content.strip():
+        log.info("[Pipeline] Patch Agent returned no change.")
+        return "", ""
+    log.info("[Pipeline] Patch Agent produced %d chars for %s", len(patched), target)
+    return patched, target
 
-    patched = _call_groq(patch_system, user_msg, temperature=0.1)
-    # Strip any accidental markdown fences
-    patched = re.sub(r"```\w*\s*", "", patched).strip().rstrip("`").strip()
-    print(f"[Pipeline] Patch Agent generated {len(patched)} chars of patched code for {os.path.basename(target_file)}")
-    return patched, os.path.basename(target_file)
 
-
-def run_patch_retry_agent(owasp_result: dict, source_files: dict, failed_patch: str, error_logs: str) -> str:
-    """
-    Step 3.5: Patch Retry Generator.
-    Called when the Sandbox Validation fails. Asks the AI to fix its patch using the compiler/SAST error logs.
-    """
+def run_patch_retry_agent(owasp_result: dict, source_files: dict, failed_patch: str,
+                          error_logs: str, client: GroqClient | None = None) -> str:
+    """Step 3.5: repair a patch that failed sandbox validation."""
+    client = client or GroqClient()
     findings = owasp_result.get("findings", [])
     if not findings:
         return failed_patch
-        
-    severity_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
-    findings_sorted = sorted(findings, key=lambda f: severity_order.get(f.get("severity", "INFO"), 4))
-    worst = findings_sorted[0]
-    
-    print(f"[Pipeline] Step 3.5: Patch Retry Agent — attempting to fix previous patch for {worst.get('severity')} issue")
-    
-    # Truncate error logs if they are too long (last 1500 chars are usually the most relevant for stack traces)
+    worst = findings[0]
     trimmed_logs = error_logs[-1500:] if len(error_logs) > 1500 else error_logs
-
-    patch_system = (
-        "You are a secure code patch generator. Your previous patch failed validation in our Docker sandbox. "
-        "You will receive the original vulnerability, your failed patch, and the sandbox error logs (syntax error or SAST finding). "
-        "Generate a NEW, corrected patch that fixes the vulnerability AND resolves the sandbox error. "
-        "Return ONLY the corrected code as a plain string — no markdown, no explanation, no JSON."
+    system = (
+        "You are a senior application-security engineer. Your previous complete-file patch failed "
+        "validation in an isolated sandbox (syntax check or SAST). You will receive the vulnerability, "
+        "your failed patch and the sandbox error output. Return the COMPLETE corrected file that fixes "
+        "the vulnerability AND resolves the error. Output only the file contents — no markdown, no prose."
     )
     user_msg = (
-        f"VULNERABILITY:\n"
+        f"VULNERABILITY\n"
         f"  File: {worst.get('file_path')}\n"
         f"  OWASP: {worst.get('owasp_class')}\n"
         f"  Severity: {worst.get('severity')}\n"
         f"  Description: {worst.get('description')}\n"
         f"  Remediation: {worst.get('remediation')}\n\n"
         f"YOUR FAILED PATCH:\n{failed_patch}\n\n"
-        f"SANDBOX ERROR LOGS:\n{trimmed_logs}\n\n"
-        f"Generate the NEW patched version of the code:"
+        f"SANDBOX ERROR OUTPUT:\n{trimmed_logs}\n\n"
+        f"Return the complete corrected file:"
     )
+    out_tokens = min(settings.LLM_MAX_OUTPUT_TOKENS * 2, estimate_tokens(failed_patch) + 600)
+    patched = _strip_code_fences(client.chat(system, user_msg, temperature=0.2, max_tokens=out_tokens))
+    log.info("[Pipeline] Patch Retry Agent generated %d chars", len(patched))
+    return patched or failed_patch
 
-    patched = _call_groq(patch_system, user_msg, temperature=0.2)
-    patched = re.sub(r"```\w*\s*", "", patched).strip().rstrip("`").strip()
-    print(f"[Pipeline] Patch Retry Agent generated {len(patched)} chars of patched code.")
-    return patched
+
+# ---------------------------------------------------------------------------
+# Secrets override
+# ---------------------------------------------------------------------------
+
+REAL_SECRET_PATTERNS = (
+    "hardcoded password", "api key", "token", "secret", "private key",
+    "credentials", "aws", "stripe", "google", "slack", "sendgrid", "twilio",
+    "mongodb", "sql connection", "basic auth",
+)
+
+
+def merge_secret_findings(findings: list[dict], secret_findings: list[dict]) -> list[dict]:
+    """
+    Hardcoded credentials found by the deterministic pre-scan are always
+    CRITICAL.  Add any that the model did not already report.
+    """
+    merged = list(findings)
+    for sf in secret_findings or []:
+        pattern = str(sf.get("pattern", "")).lower()
+        if not any(p in pattern for p in REAL_SECRET_PATTERNS):
+            continue
+        file_name = str(sf.get("file", "unknown"))
+        try:
+            line = int(sf.get("line", 0) or 0)
+        except (TypeError, ValueError):
+            line = 0
+        already = any(
+            os.path.basename(f.get("file_path", "")) == os.path.basename(file_name)
+            and f.get("severity") == "CRITICAL"
+            and (f.get("line_start") == line
+                 or any(k in f.get("title", "").lower() for k in ("secret", "credential", "hardcoded", "api key", "token", "password")))
+            for f in merged
+        )
+        if already:
+            continue
+        merged.append({
+            "file_path":   file_name,
+            "line_start":  line,
+            "line_end":    line,
+            "owasp_class": "A02 – Cryptographic Failures",
+            "severity":    "CRITICAL",
+            "title":       f"Hardcoded Secret: {sf.get('pattern', 'Unknown')}",
+            "description": f"Hardcoded credential detected in {file_name}: {str(sf.get('snippet', ''))[:80]}",
+            "remediation": "Move the credential to an environment variable / secret manager and rotate the exposed value immediately.",
+        })
+    merged.sort(key=lambda x: SEVERITY_ORDER.get(x["severity"], 4))
+    return merged
 
 
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
-def run_pipeline(source_files: dict, secret_findings: list) -> dict:
-    """
-    Runs the full three-step LangChain-style pipeline.
-
-    Returns a dict with:
-      findings         : list of OWASP finding dicts
-      critical_count   : int
-      high_count       : int
-      gate             : "APPROVED" | "BLOCKED"
-      gate_rationale   : str
-      explanation      : human-readable summary string
-      patched_code     : str (may be empty)
-      patched_filename : str (may be empty)
-    """
-    if not GROQ_API_KEY:
-        raise RuntimeError("GROQ_API_KEY is not configured")
-
-    # Step 1: OWASP classification
-    owasp_result = run_owasp_agent(source_files, secret_findings)
-
-    # Step 2: Gate decision
-    gate_result = run_gate_agent(owasp_result)
-
-    # Step 2.5: Secrets gate override
-    # Real credentials found by the pre-scan secrets scanner are always CRITICAL.
-    # Patterns that indicate genuine secrets (not false positives like CDN URLs):
-    REAL_SECRET_PATTERNS = {"hardcoded password", "api key", "token", "secret", "private key", "credentials", "generic secret"}
-    real_secrets = [
-        f for f in secret_findings
-        if any(p in f.get("pattern", "").lower() for p in REAL_SECRET_PATTERNS)
-    ]
-    if real_secrets and gate_result.get("gate") != "BLOCKED":
-        print(f"[Pipeline] Secrets gate override: {len(real_secrets)} real credential(s) found → forcing BLOCKED")
-        gate_result["gate"] = "BLOCKED"
-        gate_result["rationale"] = (
-            f"{len(real_secrets)} hardcoded credential(s) detected by pre-scan secrets scanner. "
-            "Hardcoded secrets are a critical security risk (OWASP A02/A07)."
-        )
-        # Inject them as findings too if not already in the OWASP result
-        for sf in real_secrets:
-            owasp_result["findings"].append({
-                "file_path":   sf.get("file", "unknown"),
-                "line_start":  sf.get("line", 0),
-                "line_end":    sf.get("line", 0),
-                "owasp_class": "A02 – Cryptographic Failures",
-                "severity":    "CRITICAL",
-                "title":       f"Hardcoded Secret: {sf.get('pattern', 'Unknown')}",
-                "description": f"Hardcoded credential detected in {sf.get('file')}: {sf.get('snippet', '')[:80]}",
-                "remediation": "Move credentials to environment variables and rotate the exposed secret immediately.",
-            })
-        owasp_result["critical_count"] = owasp_result.get("critical_count", 0) + len(real_secrets)
-
-    # Step 3: Patch generation (only if issues found)
-    patched_code = ""
-    patched_filename = ""
-    if owasp_result.get("findings"):
-        try:
-            patched_code, patched_filename = run_patch_agent(owasp_result, source_files)
-        except Exception as e:
-            print(f"[Pipeline] Patch agent failed (non-fatal): {e}")
-
-    # Build human-readable explanation from findings
-    findings = owasp_result.get("findings", [])
+def build_explanation(findings: list[dict], critical: int, high: int, gate: str,
+                      rationale: str, model: str, files_analysed: int) -> str:
     if findings:
-        lines = []
-        for f in findings:
-            sev = f.get('severity', 'INFO')
-            lines.append(
-                f"[{sev}] {f.get('title', f.get('owasp_class', ''))} — "
-                f"{f.get('file_path', '')} (line {f.get('line_start', '?')}) — "
-                f"{f.get('description', '')} | Fix: {f.get('remediation', '')}"
-            )
-        explanation = (
-            f"ResilioCheck AI identified {len(findings)} security issue(s) "
-            f"({owasp_result.get('critical_count', 0)} critical, "
-            f"{owasp_result.get('high_count', 0)} high).\n\n"
+        lines = [
+            f"[{f['severity']}] {f['title']} — {f['file_path']} (line {f['line_start'] or '?'}) — "
+            f"{f['description']} | Fix: {f['remediation']}"
+            for f in findings
+        ]
+        return (
+            f"ResilioCheck AI analysed {files_analysed} file(s) with {model or 'Groq'} and identified "
+            f"{len(findings)} security issue(s) ({critical} critical, {high} high). Gate verdict: {gate}.\n\n"
             + "\n".join(lines)
         )
-    else:
-        explanation = (
-            "ResilioCheck AI completed a full OWASP Top 10 analysis. "
-            "No definitive vulnerabilities were detected in the scanned files. "
-            f"Gate verdict: {gate_result.get('gate', 'APPROVED')}. "
-            f"{gate_result.get('rationale', 'No critical or high severity findings detected.')}"
-        )
+    return (
+        f"ResilioCheck AI completed an OWASP Top 10 analysis of {files_analysed} file(s) with "
+        f"{model or 'Groq'}. No definitive vulnerabilities were detected in the scanned files. "
+        f"Gate verdict: {gate}. {rationale}"
+    )
+
+
+def run_pipeline(source_files: dict, secret_findings: list, *, models: list[str] | None = None,
+                 client: GroqClient | None = None, generate_patch: bool = True) -> dict:
+    """
+    Run the full three-step pipeline.
+
+    ``source_files``    — {relative_path: content}
+    ``secret_findings`` — output of core.scan_for_secrets()
+    """
+    if client is None:
+        client = GroqClient(models=models or list(DEFAULT_MODEL_CHAIN))
+    if not client.api_key:
+        raise GroqAuthError("GROQ_API_KEY is not configured on the server.")
+
+    # Step 1
+    owasp = run_owasp_agent(client, source_files, secret_findings)
+
+    # Step 1.5 — merge deterministic secret findings
+    findings = merge_secret_findings(owasp["findings"], secret_findings)
+    critical, high = count_severities(findings)
+    owasp.update(findings=findings, critical_count=critical, high_count=high)
+
+    # Step 2
+    gate_result = run_gate_agent(client, owasp)
+
+    # Step 3 (non-fatal)
+    patched_code, patched_filename, patch_error = "", "", ""
+    if generate_patch and findings and findings[0].get("severity") in ("CRITICAL", "HIGH"):
+        try:
+            patched_code, patched_filename = run_patch_agent(client, owasp, source_files)
+        except PipelineError as exc:
+            patch_error = exc.detail
+            log.warning("[Pipeline] Patch agent skipped: %s", exc.detail)
+
+    explanation = build_explanation(
+        findings, critical, high, gate_result["gate"], gate_result["rationale"],
+        owasp.get("model", ""), len(owasp.get("files_analysed", [])),
+    )
+    if patch_error:
+        explanation += f"\n\nNote: automatic patch generation was skipped ({patch_error})."
 
     return {
         "findings":         findings,
-        "critical_count":   owasp_result.get("critical_count", 0),
-        "high_count":       owasp_result.get("high_count", 0),
-        "gate":             gate_result.get("gate", "APPROVED"),
-        "gate_rationale":   gate_result.get("rationale", ""),
+        "critical_count":   critical,
+        "high_count":       high,
+        "gate":             gate_result["gate"],
+        "gate_rationale":   gate_result["rationale"],
         "explanation":      explanation,
         "patched_code":     patched_code,
         "patched_filename": patched_filename,
+        "model":            owasp.get("model", ""),
+        "files_analysed":   owasp.get("files_analysed", []),
+        "llm_calls":        client.calls,
     }

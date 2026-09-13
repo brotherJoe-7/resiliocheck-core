@@ -1,31 +1,82 @@
-import json
+import logging
 import os
 import uuid
 import shutil
-from datetime import datetime
 import re
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Depends
+
+from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from dotenv import load_dotenv
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Session
 
+from backend import settings
 from backend.core import (
     download_and_extract_repo,
     gather_source_files,
     scan_for_secrets,
     apply_patch_and_validate,
     run_local_sast_prefilter,
+    validate_repo_url,
+    validate_branch,
+    docker_available,
+    docker_status,
 )
-from backend.langchain_pipeline import run_pipeline
+from backend.langchain_pipeline import (
+    run_pipeline,
+    run_patch_retry_agent,
+    GroqClient,
+    PipelineError,
+)
 from backend.database import engine, get_db
 from backend import models, auth, admin
+from backend.auth import get_current_user
 
-load_dotenv()
+logging.basicConfig(
+    level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+log = logging.getLogger("resiliocheck.api")
 
 # Create all DB tables on startup
 models.Base.metadata.create_all(bind=engine)
+
+
+def _ensure_columns() -> None:
+    """
+    Minimal forward-only migration: add columns that were introduced after the
+    initial schema (create_all never alters existing tables).
+    """
+    from sqlalchemy import inspect as sa_inspect
+    wanted = {
+        "scan_results": {
+            "patched_filename": "VARCHAR DEFAULT ''",
+            "patch_status":     "VARCHAR DEFAULT 'PENDING'",
+            "model":            "VARCHAR DEFAULT ''",
+        },
+        "users": {
+            "scan_count": "INTEGER DEFAULT 0",
+        },
+    }
+    try:
+        insp = sa_inspect(engine)
+        with engine.begin() as conn:
+            for table, cols in wanted.items():
+                if table not in insp.get_table_names():
+                    continue
+                existing = {c["name"] for c in insp.get_columns(table)}
+                for col, ddl in cols.items():
+                    if col not in existing:
+                        conn.execute(sa_text(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}"))
+    except Exception as exc:  # pragma: no cover
+        logging.getLogger("resiliocheck.api").warning("Column migration skipped: %s", exc)
+
+
+_ensure_columns()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -34,29 +85,42 @@ async def lifespan(app: FastAPI):
         seed_defaults(db)
     finally:
         db.close()
+    log.info("ResilioCheck API started — model chain: %s, sandbox: %s",
+             settings.resolve_model_chain(None), docker_status())
     yield
 
-app = FastAPI(title="ResilioCheck AI Backend", lifespan=lifespan)
+
+app = FastAPI(title="ResilioCheck AI Backend", version="2.0.0", lifespan=lifespan)
 
 app.include_router(auth.router)
 app.include_router(admin.router)
 
-from fastapi.concurrency import run_in_threadpool
-
-_raw_origins = os.getenv("FRONTEND_URL", "http://localhost:3000")
-_allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
-# Always include localhost for local development
-if "http://localhost:3000" not in _allowed_origins:
-    _allowed_origins.append("http://localhost:3000")
+_raw_origins = settings.FRONTEND_URL
+_allowed_origins = [o.strip().rstrip("/") for o in _raw_origins.split(",") if o.strip()]
+for _local in ("http://localhost:3000", "http://127.0.0.1:3000"):
+    if _local not in _allowed_origins:
+        _allowed_origins.append(_local)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
-    allow_origin_regex=r"https://.*\.vercel\.app",
+    allow_origin_regex=r"https://.*\.(vercel\.app|e2b\.dev|run\.app)$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(PipelineError)
+async def _pipeline_error_handler(_request: Request, exc: PipelineError):
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
+@app.exception_handler(Exception)
+async def _unhandled_error_handler(_request: Request, exc: Exception):
+    # Never leak stack traces / raw exception reprs (e.g. "RetryError[<Future ...>]") to clients.
+    log.exception("Unhandled error: %s", exc)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error. Please try again."})
 
 
 # ---------------------------------------------------------------------------
@@ -147,14 +211,14 @@ def seed_defaults(db: Session):
 # ---------------------------------------------------------------------------
 
 class ScanRequest(BaseModel):
-    repo_url: str
-    branch: str = "main"
-    engine: str = "Llama 3.3 Deep Static Analysis (SAST)"
+    repo_url: str = Field(..., min_length=10, max_length=300)
+    branch: str = Field("main", max_length=120)
+    engine: str = Field("Groq GPT-OSS 120B Deep Static Analysis (SAST)", max_length=120)
 
 
 class SettingsUpdate(BaseModel):
-    workspace: str
-    timezone: str
+    workspace: str = Field(..., min_length=1, max_length=120)
+    timezone: str = Field(..., min_length=1, max_length=120)
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +268,7 @@ def _scan_to_dict(s: models.ScanResult) -> dict:
         "patch_status":    getattr(s, "patch_status", "PENDING") or "PENDING",
         "secret_findings": s.secret_findings or [],
         "sandbox_verdict": s.sandbox_verdict,
+        "model":           getattr(s, "model", "") or "",
         "scanned_at":      s.scanned_at.isoformat() if s.scanned_at else None,
     }
 
@@ -218,188 +283,230 @@ def health_check():
 
 @app.get("/api/health")
 def api_health():
-    """Returns config info for diagnostics — model name, key presence, DB status."""
-    import os
-    from backend.database import engine
+    """Returns non-secret config info for diagnostics — model chain, key presence, DB & sandbox status."""
     try:
         with engine.connect() as conn:
-            conn.execute(__import__('sqlalchemy').text("SELECT 1"))
+            conn.execute(sa_text("SELECT 1"))
         db_status = "connected"
-    except Exception as e:
-        db_status = f"error: {e}"
+    except Exception as e:  # pragma: no cover
+        db_status = f"error: {str(e)[:120]}"
     return {
-        "status":       "online",
-        "groq_model":   os.getenv("GROQ_MODEL", "openai/gpt-oss-20b (default)"),
-        "groq_key_set": bool(os.getenv("GROQ_API_KEY")),
-        "db_status":    db_status,
+        "status":    "online",
+        "version":   app.version,
+        "db_status": db_status,
+        "sandbox":   docker_status(),
+        **settings.public_config(),
     }
 
 
+def _relativise(srcs: dict, workspace_dir: str) -> dict:
+    """{abs_path: content} -> {relative/posix/path: content}"""
+    out = {}
+    for path, content in srcs.items():
+        rel = os.path.relpath(path, workspace_dir).replace("\\", "/")
+        # Strip the GitHub archive's top-level "<repo>-<ref>/" folder
+        parts = rel.split("/", 1)
+        rel = parts[1] if len(parts) == 2 else rel
+        out[rel] = content
+    return out
 
-from backend.auth import get_current_user, require_admin
+
+# Patterns that indicate test/fixture/lock/generated files — low value for AI analysis
+_TEST_SKIP = re.compile(
+    r'(test_|_test\.|\.test\.|\.spec\.|__tests__|/tests?/|'
+    r'node_modules|\.lock$|package-lock|yarn\.lock|\.min\.js$|'
+    r'\.map$|migrations?/|fixtures?/)',
+    re.IGNORECASE,
+)
+# High-priority application code patterns
+_APP_PRIORITY = re.compile(
+    r'(route|controller|model|middleware|auth|service|handler|'
+    r'app\.(py|js|ts)|main\.(py|js|ts)|server\.(js|ts|py)|index\.(js|ts|php)|'
+    r'api/|views?\.|schema|serializer|util|helper|config(?!.*lock)|\.env)',
+    re.IGNORECASE,
+)
+
+
+def _select_files_for_ai(rel_srcs: dict, flagged_files: set, secrets: list, max_files: int) -> dict:
+    """Prioritise SAST-flagged, secret-bearing and application files."""
+    secret_basenames = {f["file"] for f in secrets}
+    priority, secondary = {}, {}
+    for rel_path, content in rel_srcs.items():
+        is_test  = bool(_TEST_SKIP.search(rel_path))
+        flagged  = rel_path in flagged_files
+        is_app   = bool(_APP_PRIORITY.search(rel_path))
+        has_sec  = os.path.basename(rel_path) in secret_basenames
+        if flagged or has_sec or (is_app and not is_test):
+            priority[rel_path] = content
+        else:
+            secondary[rel_path] = content
+
+    selected = dict(list(priority.items())[:max_files])
+    for rel_path, content in secondary.items():
+        if len(selected) >= max_files:
+            break
+        selected[rel_path] = content
+    if not selected:
+        selected = dict(list(rel_srcs.items())[:5])
+    log.info("Passing %d file(s) to AI pipeline (%d priority, %d secondary).",
+             len(selected), len(priority), len(secondary))
+    return selected
+
+
+def _run_scan_blocking(repo_url: str, branch: str, engine_label: str, workspace_dir: str) -> dict:
+    """Everything CPU / network heavy runs here, inside a worker thread."""
+    used_ref = download_and_extract_repo(repo_url, workspace_dir, branch=branch)
+    srcs = gather_source_files(workspace_dir)
+    if not srcs:
+        return {"empty": True}
+
+    rel_srcs = _relativise(srcs, workspace_dir)
+    secrets  = scan_for_secrets(srcs)
+    flagged  = run_local_sast_prefilter(workspace_dir)   # returns set() when Docker is unavailable
+    selected = _select_files_for_ai(rel_srcs, flagged, secrets, settings.MAX_FILES_FOR_AI)
+
+    client = GroqClient(models=settings.resolve_model_chain(engine_label))
+    pipe_res = run_pipeline(selected, secrets, client=client)
+
+    verdict, logs = "SKIPPED", ""
+    p_code = pipe_res.get("patched_code", "")
+    p_file = pipe_res.get("patched_filename", "")
+    if p_code and p_file:
+        if docker_available():
+            max_retries = 1   # each retry costs an LLM call — keep within the TPM budget
+            for attempt in range(max_retries + 1):
+                verdict, logs = apply_patch_and_validate(workspace_dir, p_code, p_file)
+                if verdict != "FAIL" or attempt == max_retries:
+                    break
+                log.info("Patch failed validation (attempt %d) — asking the AI to repair it", attempt + 1)
+                try:
+                    p_code = run_patch_retry_agent(pipe_res, selected, p_code, logs, client=client)
+                    pipe_res["patched_code"] = p_code
+                except PipelineError as exc:
+                    log.warning("Patch retry skipped: %s", exc.detail)
+                    break
+        else:
+            verdict, logs = "SKIPPED", "Docker sandbox unavailable on this host."
+
+    return {
+        "empty": False,
+        "used_ref": used_ref,
+        "secrets": secrets,
+        "pipeline": pipe_res,
+        "sandbox_verdict": verdict,
+        "sandbox_logs": logs[-2000:] if logs else "",
+    }
+
 
 @app.post("/api/scan")
-async def run_scan(req: ScanRequest, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    if not os.getenv("GROQ_API_KEY"):
-        raise HTTPException(status_code=500, detail="GROQ_API_KEY is not configured")
+async def run_scan(req: ScanRequest, db: Session = Depends(get_db),
+                   current_user: models.User = Depends(get_current_user)):
+    if not settings.GROQ_API_KEY:
+        raise HTTPException(status_code=503, detail="GROQ_API_KEY is not configured on the server.")
+
+    try:
+        repo_url = validate_repo_url(req.repo_url)
+        branch   = validate_branch(req.branch)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
 
     aid           = str(uuid.uuid4())
-    workspace_dir = f"./tmp_workspace_{aid[:8]}"
+    workspace_dir = os.path.abspath(f"./tmp_workspace_{aid[:8]}")
 
     try:
         shutil.rmtree(workspace_dir, ignore_errors=True)
         os.makedirs(workspace_dir, exist_ok=True)
 
-        # H4: Run expensive static analysis / network requests in threadpool
-        def _run_scan_blocking():
-            from backend.langchain_pipeline import run_patch_retry_agent
-            download_and_extract_repo(req.repo_url, workspace_dir)
-            srcs = gather_source_files(workspace_dir)
-            if not srcs:
-                return None, None, None, None
-            secrets = scan_for_secrets(srcs)
-            
-            # --- HYBRID SAST PREFILTER ---
-            # Run local SAST over the entire extracted repo
-            flagged_files = run_local_sast_prefilter(workspace_dir)
+        outcome = await run_in_threadpool(_run_scan_blocking, repo_url, branch, req.engine, workspace_dir)
 
-            # Patterns that indicate test/fixture/lock/generated files — low value for AI analysis
-            _TEST_SKIP = re.compile(
-                r'(test_|_test\.|\.test\.|\.spec\.|__tests__|/tests/|/test/|'
-                r'node_modules|\.lock$|package-lock|yarn\.lock|\.min\.js$|'
-                r'\.map$|migrations?/|fixtures?/)',
-                re.IGNORECASE
-            )
-            # High-priority application code patterns
-            _APP_PRIORITY = re.compile(
-                r'(route|controller|model|middleware|auth|service|handler|'
-                r'app\.(py|js|ts)|main\.(py|js|ts)|server\.(js|ts|py)|'
-                r'api/|views?\.|schema|serializer|util|helper|config(?!.*lock))',
-                re.IGNORECASE
-            )
-
-            # Separate files into priority buckets
-            priority_srcs = {}   # SAST-flagged OR high-priority app files
-            secondary_srcs = {}  # Everything else (including secret-only test files)
-
-            for path, content in srcs.items():
-                rel_path = os.path.relpath(path, workspace_dir).replace("\\", "/")
-                is_test_file = bool(_TEST_SKIP.search(rel_path))
-                is_flagged = rel_path in flagged_files
-                is_app_file = bool(_APP_PRIORITY.search(rel_path))
-                has_secret = any(f['file'] == os.path.basename(path) for f in secrets)
-
-                if is_flagged or (is_app_file and not is_test_file):
-                    priority_srcs[path] = content
-                elif has_secret and not is_test_file:
-                    priority_srcs[path] = content
-                else:
-                    secondary_srcs[path] = content
-
-            # Build the final set: priority files first, fill up to 15 files max
-            MAX_FILES_FOR_AI = 15
-            filtered_srcs = dict(list(priority_srcs.items())[:MAX_FILES_FOR_AI])
-            if len(filtered_srcs) < MAX_FILES_FOR_AI:
-                remaining = MAX_FILES_FOR_AI - len(filtered_srcs)
-                # Add secondary files (which may include test files with secrets) to fill quota
-                for path, content in list(secondary_srcs.items())[:remaining]:
-                    filtered_srcs[path] = content
-
-            # Hard fallback — if somehow still empty, take first 5 files
-            if not filtered_srcs:
-                print("All filters returned 0 files. Falling back to first 5 files.")
-                filtered_srcs = {k: srcs[k] for k in list(srcs.keys())[:5]}
-
-            print(f"Passing {len(filtered_srcs)} files to LLM AI pipeline "
-                  f"({len(priority_srcs)} priority, {len(secondary_srcs)} secondary).")
-
-            pipe_res = run_pipeline(filtered_srcs, secrets)
-            verdict = "SKIPPED"
-            p_code = pipe_res.get("patched_code", "")
-            p_file = pipe_res.get("patched_filename", "patched_script.js")
-            
-            if p_code:
-                max_retries = 2
-                for attempt in range(max_retries + 1):
-                    verdict, logs = apply_patch_and_validate(workspace_dir, p_code, p_file)
-                    if verdict == "PASS" or attempt == max_retries:
-                        break
-                    
-                    # If it failed, retry patching
-                    print(f"Patch failed validation (Attempt {attempt+1}/{max_retries}). Retrying with AI...")
-                    p_code = run_patch_retry_agent(pipe_res, srcs, p_code, logs)
-                    pipe_res["patched_code"] = p_code
-                    
-            return srcs, secrets, pipe_res, verdict
-
-        source_files, secret_findings, pipeline_result, sandbox_verdict = await run_in_threadpool(_run_scan_blocking)
-
-        if not source_files:
-            shutil.rmtree(workspace_dir, ignore_errors=True)
+        if outcome.get("empty"):
             result = models.ScanResult(
-                repo_url=req.repo_url, branch=req.branch, engine=req.engine,
-                gate="APPROVED", explanation="No scannable source files found.",
-                critical_count=0, high_count=0,
+                repo_url=repo_url, branch=branch, engine=req.engine,
+                gate="APPROVED", gate_rationale="No scannable source files found.",
+                explanation="No scannable source files found in the repository.",
+                critical_count=0, high_count=0, patch_status="N/A", sandbox_verdict="SKIPPED",
             )
             db.add(result)
+            current_user.scan_count = (current_user.scan_count or 0) + 1
             db.commit()
             db.refresh(result)
             return _scan_to_dict(result)
 
-        patched_code = pipeline_result.get("patched_code", "")
-        patched_filename = pipeline_result.get("patched_filename", "patched_script.js")
-        # Sanitize filename before persisting to prevent path traversal in GitHub PRs
-        if not re.match(r"^[A-Za-z0-9._\-]+$", patched_filename):
-            patched_filename = "patched_script.txt"
+        pipeline_result = outcome["pipeline"]
+        secret_findings = outcome["secrets"]
+        patched_code     = pipeline_result.get("patched_code", "") or ""
+        patched_filename = (pipeline_result.get("patched_filename", "") or "").replace("\\", "/").lstrip("/")
+        # Sanitize relative path before persisting to prevent path traversal in GitHub PRs
+        if patched_code and (not re.match(r"^[A-Za-z0-9._\-/]+$", patched_filename)
+                             or ".." in patched_filename.split("/")):
+            patched_filename = "resiliocheck_patch.txt"
 
-        shutil.rmtree(workspace_dir, ignore_errors=True)
-
-        # Persist scan result
         result = models.ScanResult(
-            repo_url        = req.repo_url,
-            branch          = req.branch,
-            engine          = req.engine,
-            gate            = pipeline_result["gate"],
-            gate_rationale  = pipeline_result["gate_rationale"],
-            critical_count  = pipeline_result["critical_count"],
-            high_count      = pipeline_result["high_count"],
-            findings        = pipeline_result["findings"],
-            explanation     = pipeline_result["explanation"],
-            patched_code    = patched_code,
-            patched_filename= patched_filename,
-            secret_findings = secret_findings,
-            sandbox_verdict = sandbox_verdict,
-            patch_status    = "PENDING" if patched_code else "N/A",
+            repo_url         = repo_url,
+            branch           = branch,
+            engine           = req.engine,
+            gate             = pipeline_result["gate"],
+            gate_rationale   = pipeline_result["gate_rationale"],
+            critical_count   = pipeline_result["critical_count"],
+            high_count       = pipeline_result["high_count"],
+            findings         = pipeline_result["findings"],
+            explanation      = pipeline_result["explanation"],
+            patched_code     = patched_code,
+            patched_filename = patched_filename if patched_code else "",
+            secret_findings  = secret_findings,
+            sandbox_verdict  = outcome["sandbox_verdict"],
+            patch_status     = "PENDING" if patched_code else "N/A",
+            model            = pipeline_result.get("model", ""),
         )
         db.add(result)
 
         # Update agent stats
         secret_agent = db.query(models.Agent).filter(models.Agent.id == "secret-scanner").first()
         if secret_agent:
-            stats = secret_agent.stats or []
-            for s in stats:
-                if s.get("label") == "Secrets Found":
-                    s["value"] = str(len(secret_findings))
+            stats = list(secret_agent.stats or [])
+            for st in stats:
+                if st.get("label") == "Secrets Found":
+                    st["value"] = str(len(secret_findings))
             secret_agent.stats = stats
-            secret_agent.log   = f"> Scan complete for {req.repo_url}\n> {len(secret_findings)} secret(s) detected."
+            secret_agent.log   = f"> Scan complete for {repo_url}\n> {len(secret_findings)} secret(s) detected."
 
         code_fixer = db.query(models.Agent).filter(models.Agent.id == "code-fixer").first()
         if code_fixer:
-            stats = code_fixer.stats or []
-            for s in stats:
-                if s.get("label") == "Issues Resolved":
-                    current = int(s.get("value", "0").replace(",", ""))
-                    s["value"] = f"{current + len(pipeline_result['findings']):,}"
+            stats = list(code_fixer.stats or [])
+            for st in stats:
+                if st.get("label") == "Issues Resolved":
+                    try:
+                        current = int(str(st.get("value", "0")).replace(",", ""))
+                    except ValueError:
+                        current = 0
+                    st["value"] = f"{current + len(pipeline_result['findings']):,}"
             code_fixer.stats = stats
-            code_fixer.log   = f"> Processed {len(pipeline_result['findings'])} finding(s) from latest scan.\n> Gate: {pipeline_result['gate']}"
+            code_fixer.log   = (f"> Processed {len(pipeline_result['findings'])} finding(s) from latest scan.\n"
+                                f"> Gate: {pipeline_result['gate']} | Model: {pipeline_result.get('model', '')}")
 
+        current_user.scan_count = (current_user.scan_count or 0) + 1
         db.commit()
         db.refresh(result)
-        return _scan_to_dict(result)
+        payload = _scan_to_dict(result)
+        payload["sandbox_logs"] = outcome.get("sandbox_logs", "")
+        payload["llm_calls"] = pipeline_result.get("llm_calls", 0)
+        payload["files_analysed"] = pipeline_result.get("files_analysed", [])
+        return payload
 
-    except Exception as e:
+    except PipelineError as exc:
+        log.warning("Pipeline error for %s: %s", repo_url, exc.detail)
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+    except (ValueError, RuntimeError) as exc:
+        # download / validation problems — message is already user-friendly
+        log.warning("Scan failed for %s: %s", repo_url, exc)
+        raise HTTPException(status_code=400, detail=f"Scan failed: {exc}")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception("Unexpected pipeline failure for %s", repo_url)
+        raise HTTPException(status_code=500, detail=f"Pipeline error: {type(exc).__name__}: {str(exc)[:300]}")
+    finally:
         shutil.rmtree(workspace_dir, ignore_errors=True)
-        raise HTTPException(status_code=500, detail=f"Pipeline error: {str(e)}")
 
 
 @app.get("/api/scans")
@@ -417,8 +524,7 @@ def apply_patch_pr(scan_id: int, db: Session = Depends(get_db), current_user: mo
     Creates a GitHub Pull Request applying the AI-generated patch.
     Uses GITHUB_TOKEN from .env to authenticate.
     """
-    import tempfile
-    import subprocess
+    import base64
     import requests as http_requests
 
     scan = db.query(models.ScanResult).filter(models.ScanResult.id == scan_id).first()
@@ -429,9 +535,9 @@ def apply_patch_pr(scan_id: int, db: Session = Depends(get_db), current_user: mo
     if getattr(scan, "patch_status", "PENDING") == "APPLIED":
         raise HTTPException(status_code=400, detail="Patch already applied")
 
-    github_token = os.getenv("GITHUB_TOKEN")
+    github_token = settings.GITHUB_TOKEN
     if not github_token:
-        raise HTTPException(status_code=500, detail="GITHUB_TOKEN is not configured")
+        raise HTTPException(status_code=503, detail="GITHUB_TOKEN is not configured on the server — automated PRs are disabled.")
 
     # Parse owner/repo from repo_url
     repo_url = scan.repo_url.rstrip("/")
@@ -441,7 +547,9 @@ def apply_patch_pr(scan_id: int, db: Session = Depends(get_db), current_user: mo
     owner, repo = parts[0], parts[1]
 
     branch_name  = f"resiliocheck-fix-{scan_id}"
-    patched_file = getattr(scan, "patched_filename", None) or "patched_fix.txt"
+    patched_file = (getattr(scan, "patched_filename", None) or "resiliocheck_patch.txt").lstrip("/")
+    if not re.match(r"^[A-Za-z0-9._\-/]+$", patched_file) or ".." in patched_file.split("/"):
+        raise HTTPException(status_code=400, detail="Stored patch filename is invalid")
 
     try:
         # ── 1. Get default branch SHA ──────────────────────────────────────────
@@ -454,7 +562,7 @@ def apply_patch_pr(scan_id: int, db: Session = Depends(get_db), current_user: mo
             headers=headers, timeout=15,
         )
         if ref_resp.status_code != 200:
-            raise HTTPException(status_code=502, detail=f"GitHub ref lookup failed: {ref_resp.text}")
+            raise HTTPException(status_code=502, detail=f"GitHub ref lookup failed ({ref_resp.status_code}): {ref_resp.text[:300]}")
         base_sha = ref_resp.json()["object"]["sha"]
 
         # ── 2. Create fix branch ───────────────────────────────────────────────
@@ -465,7 +573,7 @@ def apply_patch_pr(scan_id: int, db: Session = Depends(get_db), current_user: mo
             timeout=15,
         )
         if create_branch.status_code not in (201, 422):   # 422 = already exists
-            raise HTTPException(status_code=502, detail=f"Branch creation failed: {create_branch.text}")
+            raise HTTPException(status_code=502, detail=f"Branch creation failed ({create_branch.status_code}): {create_branch.text[:300]}")
 
         # ── 3. Get current file SHA (needed for update) ────────────────────────
         file_resp = http_requests.get(
@@ -477,7 +585,6 @@ def apply_patch_pr(scan_id: int, db: Session = Depends(get_db), current_user: mo
         file_sha = file_resp.json().get("sha") if file_resp.status_code == 200 else None
 
         # ── 4. Push patched file ───────────────────────────────────────────────
-        import base64
         content_b64 = base64.b64encode(scan.patched_code.encode()).decode()
         update_payload = {
             "message": f"fix(resiliocheck): AI-generated security patch for scan #{scan_id}",
@@ -494,7 +601,7 @@ def apply_patch_pr(scan_id: int, db: Session = Depends(get_db), current_user: mo
             timeout=15,
         )
         if push_resp.status_code not in (200, 201):
-            raise HTTPException(status_code=502, detail=f"File push failed: {push_resp.text}")
+            raise HTTPException(status_code=502, detail=f"File push failed ({push_resp.status_code}): {push_resp.text[:300]}")
 
         # ── 5. Open Pull Request ───────────────────────────────────────────────
         pr_resp = http_requests.post(
@@ -517,7 +624,7 @@ def apply_patch_pr(scan_id: int, db: Session = Depends(get_db), current_user: mo
             timeout=15,
         )
         if pr_resp.status_code not in (200, 201):
-            raise HTTPException(status_code=502, detail=f"PR creation failed: {pr_resp.text}")
+            raise HTTPException(status_code=502, detail=f"PR creation failed ({pr_resp.status_code}): {pr_resp.text[:300]}")
 
         pr_url = pr_resp.json().get("html_url", "")
 
@@ -538,6 +645,10 @@ def reject_patch(scan_id: int, db: Session = Depends(get_db), current_user: mode
     scan = db.query(models.ScanResult).filter(models.ScanResult.id == scan_id).first()
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
+    if not scan.patched_code:
+        raise HTTPException(status_code=400, detail="No patch available for this scan")
+    if scan.patch_status == "APPLIED":
+        raise HTTPException(status_code=400, detail="Patch already applied — cannot reject")
     scan.patch_status = "REJECTED"
     db.commit()
     return {"status": "success", "patch_status": "REJECTED"}
@@ -550,21 +661,28 @@ def get_gates(db: Session = Depends(get_db), current_user: models.User = Depends
     return [_gate_to_dict(g) for g in db.query(models.Gate).all()]
 
 class GateCreate(BaseModel):
-    name: str
-    desc: str
-    strictness: list[str]  # M2: Pass lists to avoid json mismatch
-    action: list[str]
+    name: str = Field(..., min_length=2, max_length=80)
+    desc: str = Field("", max_length=400)
+    strictness: list[str] | str = Field(default_factory=list)
+    action: list[str] | str = Field(default_factory=list)
 
 @app.post("/api/gates")
 def create_gate(gate_in: GateCreate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    gate_id = gate_in.name.lower().replace(" ", "_").replace("-", "_") + f"_{db.query(models.Gate).count()}"
+    strictness = [gate_in.strictness] if isinstance(gate_in.strictness, str) else gate_in.strictness
+    action     = [gate_in.action] if isinstance(gate_in.action, str) else gate_in.action
+    base_id = re.sub(r"[^a-z0-9]+", "_", gate_in.name.lower()).strip("_") or "gate"
+    gate_id = base_id
+    n = 1
+    while db.query(models.Gate).filter(models.Gate.id == gate_id).first():
+        n += 1
+        gate_id = f"{base_id}_{n}"
     new_gate = models.Gate(
         id=gate_id,
         name=gate_in.name,
         desc=gate_in.desc,
         active=True,
-        strictness=gate_in.strictness,
-        action=gate_in.action
+        strictness=strictness,
+        action=action,
     )
     db.add(new_gate)
     db.commit()
@@ -625,7 +743,7 @@ def get_deployments(db: Session = Depends(get_db), current_user: models.User = D
             "statusCls": "rc-pill-teal" if passed else "rc-pill-red",
             "icon":      "✓" if passed else "!",
             "iconColor": "var(--teal)" if passed else "var(--red)",
-            "title":     s.repo_url.rstrip("/").split("/")[-1].replace("-", " ").title(),
+            "title":     (s.repo_url or "").rstrip("/").split("/")[-1].replace("-", " ").title() or "Unknown",
             "target":    f"Branch: {s.branch}",
             "checks": [
                 {"label": f"SAST: {s.gate}", "ok": passed},
@@ -643,23 +761,7 @@ def get_scan_detail(scan_id: int, db: Session = Depends(get_db), current_user: m
     s = db.query(models.ScanResult).filter(models.ScanResult.id == scan_id).first()
     if not s:
         raise HTTPException(status_code=404, detail="Scan not found")
-    return {
-        "id":               s.id,
-        "repo_url":         s.repo_url,
-        "branch":           s.branch,
-        "engine":           s.engine,
-        "gate":             s.gate,
-        "gate_rationale":   s.gate_rationale,
-        "critical_count":   s.critical_count,
-        "high_count":       s.high_count,
-        "findings":         s.findings or [],
-        "explanation":      s.explanation,
-        "patched_filename": s.patched_filename,
-        "patch_status":     s.patch_status,
-        "secret_findings":  s.secret_findings or [],
-        "sandbox_verdict":  s.sandbox_verdict,
-        "scanned_at":       str(s.scanned_at),
-    }
+    return _scan_to_dict(s)
 
 
 # ── Settings ─────────────────────────────────────────────────────────────────

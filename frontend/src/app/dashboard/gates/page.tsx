@@ -1,28 +1,31 @@
 'use client';
-import { fetchApi } from '@/app/utils/apiClient';
+import { apiJson } from '@/app/utils/apiClient';
+import type { Gate, ScanResult } from '@/app/types';
 import { useState, useEffect } from 'react';
 import Sidebar from '../../components/Sidebar';
 import { Circle } from 'lucide-react';
 
 
 export default function GatesPage() {
-  const [gates, setGates]   = useState<any[]>([]);
+  const [gates, setGates]   = useState<Gate[]>([]);
   const [loading, setLoading] = useState(true);
   const [scanStats, setScanStats] = useState({ total: 0, blocked: 0 });
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newGate, setNewGate] = useState({ name: '', desc: '', strictness: 'Standard', action: 'Alert Only' });
 
+  const [loadError, setLoadError] = useState('');
+  const [createError, setCreateError] = useState('');
+
   useEffect(() => {
-    fetchApi('/api/gates')
-      .then(res => res.json())
-      .then(data => { setGates(data); setLoading(false); })
-      .catch(err => console.error(err));
+    apiJson<Gate[]>('/api/gates')
+      .then(data => { setGates(Array.isArray(data) ? data : []); setLoading(false); })
+      .catch(err => { setLoadError(err instanceof Error ? err.message : 'Failed to load gates.'); setLoading(false); });
 
     // Load scan history to compute real block/pass counts
-    fetchApi('/api/scans')
-      .then(res => res.json())
-      .then((scans: any[]) => {
+    apiJson<ScanResult[]>('/api/scans')
+      .then((scans) => {
+        if (!Array.isArray(scans)) return;
         const blocked = scans.filter(s => s.gate === 'BLOCKED').length;
         setScanStats({ total: scans.length, blocked });
       })
@@ -30,30 +33,33 @@ export default function GatesPage() {
   }, []);
 
   async function toggle(id: string) {
-    setGates(g => g.map(gate => gate.id === id ? { ...gate, active: !gate.active, status: !gate.active ? 'ACTIVE' : 'INACTIVE', statusCls: !gate.active ? 'rc-pill-green' : 'rc-pill-gray' } : gate));
+    const prev = gates;
+    setGates(g => g.map(gate => gate.id === id ? { ...gate, active: !gate.active, status: !gate.active ? 'ACTIVE' : 'DISABLED', statusCls: !gate.active ? 'rc-pill-green' : 'rc-pill-red' } : gate));
     try {
-      await fetchApi(`/api/gates/${id}/toggle`, { method: 'POST' });
+      const data = await apiJson<{ gate: Gate }>(`/api/gates/${id}/toggle`, { method: 'POST' });
+      setGates(g => g.map(gate => gate.id === id ? data.gate : gate));
     } catch (err) {
       console.error(err);
+      setGates(prev); // roll back optimistic update
     }
   }
 
   async function handleCreateGate(e: React.FormEvent) {
     e.preventDefault();
+    setCreateError('');
     try {
-      const res = await fetchApi('/api/gates', {
+      const data = await apiJson<{ status: string; gate: Gate }>('/api/gates', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newGate)
+        body: JSON.stringify({ ...newGate, strictness: [newGate.strictness], action: [newGate.action] })
       });
-      const data = await res.json();
       if (data.status === 'success') {
-        setGates([...gates, data.gate]);
+        setGates(g => [...g, data.gate]);
         setIsModalOpen(false);
         setNewGate({ name: '', desc: '', strictness: 'Standard', action: 'Alert Only' });
       }
     } catch (err) {
-      console.error(err);
+      setCreateError(err instanceof Error ? err.message : 'Failed to create gate.');
     }
   }
 
@@ -76,6 +82,8 @@ export default function GatesPage() {
 
         {loading ? (
           <div style={{ color: 'var(--text-muted)' }}>Loading gates...</div>
+        ) : loadError ? (
+          <div style={{ color: 'var(--red)' }}>{loadError}</div>
         ) : (
           <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start' }}>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -100,13 +108,13 @@ export default function GatesPage() {
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Strictness Level</div>
                       <select className="rc-input">
-                        {gate.strictness.map ? gate.strictness.map((s: string) => <option key={s}>{s}</option>) : <option>{gate.strictness}</option>}
+                        {(Array.isArray(gate.strictness) ? gate.strictness : [gate.strictness]).map((s: string) => <option key={s}>{s}</option>)}
                       </select>
                     </div>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Action on Failure</div>
                       <select className="rc-input">
-                        {gate.action.map ? gate.action.map((a: string) => <option key={a}>{a}</option>) : <option>{gate.action}</option>}
+                        {(Array.isArray(gate.action) ? gate.action : [gate.action]).map((a: string) => <option key={a}>{a}</option>)}
                       </select>
                     </div>
                   </div>
@@ -181,6 +189,7 @@ export default function GatesPage() {
                     <option>Auto-Revert Commit</option>
                   </select>
                 </div>
+                {createError && <div style={{ color: 'var(--red)', fontSize: '0.8rem' }}>{createError}</div>}
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 8 }}>
                   <button type="button" className="rc-btn-secondary" onClick={() => setIsModalOpen(false)}>Cancel</button>
                   <button type="submit" className="rc-btn-primary">Create Gate</button>

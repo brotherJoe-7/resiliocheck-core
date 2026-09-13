@@ -3,25 +3,65 @@ import time
 import re
 import shutil
 import zipfile
+import logging
 import requests
 import json
-import docker
 from pathlib import Path
-from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL   = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
+try:  # docker SDK is optional — the pipeline degrades gracefully without it
+    import docker  # type: ignore
+except Exception:  # pragma: no cover
+    docker = None  # type: ignore
 
-# NOTE: The key is validated lazily inside run_ai_analysis() instead of at
-# import time — the dashboard imports helper functions from this module and a
-# module-level RuntimeError would crash the whole Streamlit app on startup.
+from backend import settings
+
+log = logging.getLogger("resiliocheck.core")
+
+GROQ_API_KEY = settings.GROQ_API_KEY
+GROQ_MODEL   = settings.GROQ_MODEL
 
 
 def _require_api_key() -> None:
     if not GROQ_API_KEY:
         raise RuntimeError("GROQ_API_KEY is required. Set it in your .env file and restart.")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DOCKER AVAILABILITY (cached)
+# ─────────────────────────────────────────────────────────────────────────────
+_docker_state: dict = {"checked_at": 0.0, "available": False, "reason": ""}
+
+
+def docker_available(force: bool = False) -> bool:
+    """
+    True if the Docker daemon is reachable AND the sandbox image exists.
+    Result is cached for 60 s so we don't hammer the socket on every scan.
+    On Cloud Run there is no Docker daemon, so this returns False and the
+    sandbox stage is reported as SKIPPED instead of raising.
+    """
+    if not settings.SANDBOX_ENABLED:
+        _docker_state.update(available=False, reason="SANDBOX_ENABLED=false")
+        return False
+    if docker is None:
+        _docker_state.update(available=False, reason="docker SDK not installed")
+        return False
+    now = time.time()
+    if not force and now - _docker_state["checked_at"] < 60:
+        return _docker_state["available"]
+    try:
+        client = docker.from_env()
+        client.ping()
+        client.images.get(settings.SANDBOX_IMAGE)
+        _docker_state.update(checked_at=now, available=True, reason="")
+    except Exception as exc:  # daemon missing, socket denied, image missing…
+        _docker_state.update(checked_at=now, available=False, reason=str(exc)[:200])
+        log.info("Docker sandbox unavailable: %s", _docker_state["reason"])
+    return _docker_state["available"]
+
+
+def docker_status() -> dict:
+    docker_available()
+    return {"available": _docker_state["available"], "reason": _docker_state["reason"], "image": settings.SANDBOX_IMAGE}
 
 
 # ✅ SECURITY: strict GitHub 'owner/repo' allowlist — used to validate every
@@ -72,8 +112,17 @@ SECRET_PATTERNS = [
     ("Hardcoded Password",      re.compile(r'(?i)(password|passwd|pwd)\s*=\s*["\'](?!.*\{)[^"\']{6,}["\']')),
     ("MongoDB Connection",      re.compile(r'mongodb(\+srv)?://[^:]+:[^@]+@')),
     ("SQL Connection String",   re.compile(r'(?i)(jdbc:|mysql://|postgres://|postgresql://)[^\s"\'<>]+')),
-    ("Basic Auth in URL",       re.compile(r'https?://[^:@\s]+:[^@\s]{4,}@[^\s]+')),
+    # user:pass@host  — requires a real host after the '@' and excludes the
+    # Google-Fonts style 'wght@400;500' query strings (no ':' before '@').
+    ("Basic Auth in URL",       re.compile(r'https?://[A-Za-z0-9._%+\-]+:[^@\s/?#]{4,}@[A-Za-z0-9.\-]+(?::\d+)?(?:/|\s|$|["\'])')),
 ]
+
+# Snippets that look like secrets but are placeholders / examples
+_PLACEHOLDER_RE = re.compile(
+    r'(your[_-]?|<[^>]+>|xxx+|\$\{|process\.env|os\.environ|getenv|example|placeholder|changeme|'
+    r'\bnull\b|\bnone\b|\bundefined\b)',
+    re.IGNORECASE,
+)
 
 # File types to scan (binary, lockfiles and generated output excluded)
 SCANNABLE_EXTENSIONS = {
@@ -106,22 +155,48 @@ SKIP_FILENAMES = {
 }
 
 
-def download_and_extract_repo(repo_url, target_dir):
+_BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/\-]{0,100}$")
+
+
+def validate_branch(branch: str | None) -> str:
+    """Return a safe branch name (defaults to 'main')."""
+    b = (branch or "main").strip()
+    if not _BRANCH_RE.fullmatch(b) or ".." in b or b.endswith("/") or b.endswith(".lock"):
+        raise ValueError("Invalid branch name.")
+    return b
+
+
+def download_and_extract_repo(repo_url, target_dir, branch: str | None = None):
+    """
+    Download the repository archive for *branch* (falls back to the default
+    branch, then main/master) and extract it safely into *target_dir*.
+    Returns the ref that was actually downloaded.
+    """
     # ✅ SECURITY: validate + normalise the URL before any request (SSRF guard).
     repo_url = validate_repo_url(repo_url)
     print(f"Downloading repository from {repo_url}...")
 
     zip_path = os.path.join(target_dir, "repo.zip")
     downloaded = False
+    used_ref = ""
+    refs: list[str] = []
+    if branch:
+        refs.append(f"refs/heads/{validate_branch(branch)}")
     # 'HEAD' resolves to the default branch automatically; keep main/master
     # as explicit fallbacks for older mirrors.
-    for ref in ("HEAD", "refs/heads/main", "refs/heads/master"):
+    for r in ("HEAD", "refs/heads/main", "refs/heads/master"):
+        if r not in refs:
+            refs.append(r)
+
+    last_status = None
+    for ref in refs:
         zip_url = f"{repo_url}/archive/{ref}.zip"
         try:
-            response = requests.get(zip_url, timeout=30, stream=True)
+            response = requests.get(zip_url, timeout=30, stream=True, allow_redirects=True)
         except requests.RequestException as exc:
             print(f"Request for '{ref}' failed: {exc}")
             continue
+        last_status = response.status_code
         if response.status_code == 200:
             # ✅ SECURITY: stream to disk with a hard size cap.
             written = 0
@@ -134,11 +209,21 @@ def download_and_extract_repo(repo_url, target_dir):
                         raise RuntimeError("Repository archive exceeds the 100 MB safety limit.")
                     f.write(chunk)
             downloaded = True
+            used_ref = ref
+            if branch and ref != f"refs/heads/{branch}":
+                print(f"Branch '{branch}' not found — fell back to '{ref}'.")
             break
         print(f"Ref '{ref}' not found (HTTP {response.status_code}), trying next...")
 
     if not downloaded:
-        raise RuntimeError("Failed to download repository — no default/main/master branch found.")
+        if last_status == 404:
+            raise RuntimeError(
+                "Repository not found (HTTP 404). Check that the URL is correct and the repository is public."
+            )
+        raise RuntimeError(
+            f"Failed to download repository archive (last HTTP status: {last_status}). "
+            "Only public GitHub repositories are supported."
+        )
 
     print("Extracting files...")
     # SECURITY: Sanitise every ZIP member to prevent path-traversal (CWE-22).
@@ -152,6 +237,7 @@ def download_and_extract_repo(repo_url, target_dir):
             zip_ref.extract(member, target_dir)
 
     os.remove(zip_path)
+    return used_ref
 
 
 def gather_source_files(workspace_dir, max_files=20, max_bytes=20_000):
@@ -249,6 +335,10 @@ def scan_for_secrets(source_files):
                 continue
             for label, pattern in SECRET_PATTERNS:
                 if pattern.search(line):
+                    # Skip obvious placeholders / env lookups (e.g. password: process.env.PASS)
+                    if label in ("Generic API Key", "Generic Secret/Token", "Hardcoded Password") \
+                            and _PLACEHOLDER_RE.search(line):
+                        continue
                     findings.append({
                         "file":    basename,
                         "line":    lineno,
@@ -266,12 +356,15 @@ def run_local_sast_prefilter(workspace_dir: str) -> set:
     This acts as a high-precision filter so we only send relevant files to the LLM.
     """
     flagged_files = set()
+    if not docker_available():
+        print(f"Local SAST prefilter skipped — Docker sandbox unavailable ({_docker_state['reason']}).")
+        return flagged_files
     print("Running local SAST prefilter on entire workspace...")
-    
+
     try:
         client = docker.from_env()
         abs_workspace = os.path.abspath(workspace_dir)
-        image = "resiliocheck-sandbox:latest"
+        image = settings.SANDBOX_IMAGE
 
         command = [
             "sh", "-c",
@@ -326,146 +419,6 @@ def run_local_sast_prefilter(workspace_dir: str) -> set:
         
     print(f"Local SAST prefilter flagged {len(flagged_files)} files.")
     return flagged_files
-
-
-def run_ai_analysis(source_files, secret_findings=None):
-    """
-    Sends collected source files to the Groq LLM for deep security analysis.
-    Uses a system+user message pair for reliable JSON output.
-
-    Returns a tuple: (explanation: str, patched_code: str)
-    """
-    _require_api_key()
-    print("Sending code to Groq AI for security analysis...")
-
-    system_message = (
-        "You are ResilioCheck AI, an elite application security engineer specializing in "
-        "OWASP Top 10 vulnerability detection. When given source code, you MUST respond "
-        "with a valid JSON object (no markdown, no code fences) containing exactly two keys:\n"
-        "1. \"explanation\": A detailed, structured security analysis string listing every "
-        "vulnerability found. For each issue include: file name, line number if known, "
-        "OWASP category (e.g. A03-Injection), severity (CRITICAL/HIGH/MEDIUM/LOW), "
-        "description, and specific remediation steps. If no vulnerabilities found, "
-        "write a brief clean-bill-of-health summary.\n"
-        "2. \"patched_code\": A string containing corrected/patched code for the most "
-        "critical vulnerability found. Use an empty string if no patch is needed.\n\n"
-        "IMPORTANT: Your ENTIRE response must be a single raw JSON object. "
-        "Do NOT use ```json fences. Do NOT include any text before or after the JSON."
-    )
-
-    secret_block = ""
-    if secret_findings:
-        lines = [f"  - [{f['pattern']}] {f['file']}:{f['line']}: {f['snippet']}" for f in secret_findings[:10]]
-        secret_block = (
-            f"\n[PRE-SCAN RESULTS] Regex scanner detected {len(secret_findings)} hardcoded "
-            f"secret(s) before AI analysis. Include these in your findings:\n"
-            + "\n".join(lines) + "\n"
-        )
-
-    user_intro = (
-        "Analyse the following source files for security vulnerabilities. "
-        "Remember: respond with ONLY a raw JSON object with keys 'explanation' and 'patched_code'.\n"
-        + secret_block
-        + "\n--- SOURCE FILES ---\n"
-    )
-
-    # Pack as many files as possible within ~27000 chars (~6750 tokens)
-    MAX_PAYLOAD_CHARS = 27_000
-    file_parts = []
-    total_chars = len(system_message) + len(user_intro)
-    for filepath, content in source_files.items():
-        fname = os.path.basename(filepath)
-        # Each file gets at most 1500 chars to share budget fairly
-        trimmed = content[:1500] if len(content) > 1500 else content
-        snippet = f"\n=== {fname} ===\n{trimmed}\n"
-        if total_chars + len(snippet) > MAX_PAYLOAD_CHARS:
-            break
-        file_parts.append(snippet)
-        total_chars += len(snippet)
-
-    user_message = user_intro + "".join(file_parts)
-    print(f"Prompt payload: {len(user_message)} chars covering {len(file_parts)} file(s).")
-
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type":  "application/json",
-    }
-    payload = {
-        "model":       GROQ_MODEL,
-        "messages":    [
-            {"role": "system", "content": system_message},
-            {"role": "user",   "content": user_message},
-        ],
-        "temperature": 0.1,
-    }
-
-    try:
-        response = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers=headers,
-            json=payload,
-            timeout=90,
-        )
-        response.raise_for_status()
-        result = response.json()
-
-        choices     = result.get("choices") or []
-        first       = choices[0] if choices else {}
-        raw_content = (first.get("message") or {}).get("content", "")
-
-        print(f"\n[DEBUG] Raw AI response ({len(raw_content)} chars):")
-        try:
-            print(raw_content[:500])
-        except UnicodeEncodeError:
-            print(raw_content[:500].encode('ascii', 'ignore').decode('ascii'))
-
-        # If content is empty or null, check for tool_use_failed in the error body
-        if not raw_content.strip():
-            err_body = result.get("error", {})
-            failed_gen = err_body.get("failed_generation", "")
-            if failed_gen:
-                raw_content = failed_gen  # use the reasoning output as fallback
-
-        # First try direct JSON parse
-        ai_data = {}
-        try:
-            ai_data = json.loads(raw_content)
-        except json.JSONDecodeError:
-            # Fallback: strip markdown fences then try again
-            cleaned = re.sub(r'```(?:json)?\s*', '', raw_content).strip().rstrip('`').strip()
-            try:
-                ai_data = json.loads(cleaned)
-            except json.JSONDecodeError:
-                # Fallback: extract first {...} block from the response
-                match = re.search(r'\{[\s\S]*\}', cleaned)
-                if match:
-                    try:
-                        ai_data = json.loads(match.group(0))
-                    except json.JSONDecodeError:
-                        pass
-                if not ai_data:
-                    # Last resort: treat entire response as the explanation
-                    ai_data = {"explanation": raw_content.strip() or "Analysis complete — no structured output returned by model.", "patched_code": ""}
-
-        explanation  = ai_data.get("explanation", "").strip()
-        patched_code = ai_data.get("patched_code", "")
-
-        # Final guard — if explanation is still empty after all parsing
-        if not explanation:
-            explanation = "Security analysis complete. The AI model returned an empty report for this repository — this typically means no obvious vulnerabilities were detected in the scanned files."
-
-        print("\nAI Explanation:")
-        try:
-            print(explanation[:300])
-        except UnicodeEncodeError:
-            print(explanation[:300].encode('ascii', 'ignore').decode('ascii'))
-        return explanation, patched_code
-
-    except Exception as e:
-        print(f"ERROR: AI Analysis failed: {str(e)}")
-        if "response" in locals() and hasattr(response, "text"):
-            print(f"Response: {response.text[:500]}")
-        return "AI analysis failed.", None
 
 
 def _extract_mock_env(workspace_dir: str) -> dict:
@@ -550,11 +503,18 @@ def apply_patch_and_validate(workspace_dir, patched_code, patched_filename="patc
         print("No patched code generated — skipping sandbox.")
         return "SKIPPED", ""
 
-    # C2: Sanitize patched_filename to prevent command injection / path traversal
-    if not re.match(r"^[A-Za-z0-9._\-]+$", patched_filename):
+    if not docker_available():
+        print(f"Sandbox validation skipped — Docker unavailable ({_docker_state['reason']}).")
+        return "SKIPPED", f"Docker sandbox unavailable: {_docker_state['reason']}"
+
+    # C2: Sanitize patched_filename to prevent command injection / path traversal.
+    # Relative paths (e.g. src/app/routes.js) are allowed; '..' segments are not.
+    patched_filename = (patched_filename or "").replace("\\", "/").lstrip("/")
+    if not re.match(r"^[A-Za-z0-9._\-/]+$", patched_filename) or ".." in patched_filename.split("/"):
         patched_filename = "patched_script.txt"
 
     patched_file_path = os.path.join(workspace_dir, patched_filename)
+    os.makedirs(os.path.dirname(patched_file_path) or workspace_dir, exist_ok=True)
     ext = os.path.splitext(patched_filename)[1].lower()
     project_type = _detect_project_type(workspace_dir)
     mock_env = _extract_mock_env(workspace_dir)
@@ -578,7 +538,7 @@ def apply_patch_and_validate(workspace_dir, patched_code, patched_filename="patc
         client = docker.from_env()
         abs_workspace = os.path.abspath(workspace_dir)
 
-        image = "resiliocheck-sandbox:latest"
+        image = settings.SANDBOX_IMAGE
 
         # ── Select SAST command, and syntax command by language ──────
         # We pass patched_filename as $1 to avoid shell string interpolation (C2)
@@ -639,7 +599,7 @@ def apply_patch_and_validate(workspace_dir, patched_code, patched_filename="patc
             tmpfs={'/tmp': '', '/run': ''}
         )
 
-        exit_status = container.wait(timeout=180)
+        exit_status = container.wait(timeout=settings.SANDBOX_TIMEOUT_SECONDS)
         logs = container.logs().decode("utf-8", errors="replace")
 
         syntax_ok = "SYNTAX:OK" in logs or "SYNTAX:SKIPPED" in logs
@@ -687,53 +647,44 @@ def apply_patch_and_validate(workspace_dir, patched_code, patched_filename="patc
 
 
 if __name__ == "__main__":
+    # Simple CLI entry point: python -m backend.core
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     _require_api_key()
     repo_url = input("Enter Public GitHub Repository URL: ").strip()
 
     if not repo_url:
         print("ERROR: Repository URL is required.")
-        exit(1)
+        raise SystemExit(1)
 
     try:
         repo_url = validate_repo_url(repo_url)
     except ValueError as ve:
         print(f"ERROR: {ve}")
-        exit(1)
+        raise SystemExit(1)
 
     WORKSPACE_DIR = "./tmp_workspace"
-
-    if os.path.exists(WORKSPACE_DIR):
-        shutil.rmtree(WORKSPACE_DIR, ignore_errors=True)
+    shutil.rmtree(WORKSPACE_DIR, ignore_errors=True)
     os.makedirs(WORKSPACE_DIR, exist_ok=True)
 
     try:
-        download_and_extract_repo(repo_url, WORKSPACE_DIR)
+        from backend.langchain_pipeline import run_pipeline
 
+        download_and_extract_repo(repo_url, WORKSPACE_DIR)
         source_files = gather_source_files(WORKSPACE_DIR)
         if not source_files:
             print("No scannable source files found in the repository.")
         else:
             print(f"Found {len(source_files)} file(s) for analysis.")
-
-            # Stage 1: Deterministic regex secret scan
+            rel_files = {os.path.relpath(p, WORKSPACE_DIR).replace("\\", "/"): c for p, c in source_files.items()}
             secret_findings = scan_for_secrets(source_files)
-            if secret_findings:
-                print(f"\nPRE-SCAN ALERT — {len(secret_findings)} hardcoded secret(s) detected:")
-                for f in secret_findings:
-                    print(f"  [{f['pattern']}] {f['file']}:{f['line']} — {f['snippet']}")
-            else:
-                print("Pre-scan: No hardcoded secrets detected by pattern matching.")
-
-            # Stage 2: AI deep analysis
-            explanation, patched_code = run_ai_analysis(source_files, secret_findings)
-
-            # Stage 3: Docker sandbox validation (JS patches only)
-            if patched_code:
-                verdict = apply_patch_and_validate(WORKSPACE_DIR, patched_code)
-                print(f"Final sandbox verdict: {verdict}")
-
+            for f in secret_findings:
+                print(f"  [{f['pattern']}] {f['file']}:{f['line']} — {f['snippet']}")
+            result = run_pipeline(rel_files, secret_findings)
+            print(f"\nGate: {result['gate']} — {result['gate_rationale']}")
+            print(result["explanation"])
+            if result["patched_code"]:
+                verdict, _logs = apply_patch_and_validate(WORKSPACE_DIR, result["patched_code"], result["patched_filename"])
+                print(f"Sandbox verdict: {verdict}")
     finally:
-        # ✅ Clean up the downloaded workspace so repository contents never
-        # linger on disk (or get committed) after a run.
         shutil.rmtree(WORKSPACE_DIR, ignore_errors=True)
         print("\nExecution finished.")

@@ -1,8 +1,22 @@
 'use client';
-import { fetchApi } from '@/app/utils/apiClient';
+import { apiJson, ApiError } from '@/app/utils/apiClient';
 import { useState, useEffect, useCallback } from 'react';
 import Sidebar from '../components/Sidebar';
 import { Zap, Check, AlertTriangle, Hourglass, LayoutGrid, X, CheckCircle2 } from 'lucide-react';
+
+import type { ScanResult } from '@/app/types';
+
+const ENGINE_OPTIONS = [
+  'Groq GPT-OSS 120B Deep Static Analysis (SAST)',
+  'Groq GPT-OSS 20B Fast Analysis',
+  'Qwen 3.6 27B Code Review',
+];
+
+function errorMessage(e: unknown, fallback: string): string {
+  if (e instanceof ApiError) return e.message;
+  if (e instanceof Error) return e.message || fallback;
+  return fallback;
+}
 
 
 const INITIAL_GATES = {
@@ -28,8 +42,12 @@ const SEVERITY_COLOR: Record<string, string> = {
 };
 
 function GatePill({ status }: { status: string }) {
-  const cls   = status === 'APPROVED' ? 'rc-pill-green' : status === 'PENDING' ? 'rc-pill-yellow' : 'rc-pill-red';
-  const label = status === 'PENDING' ? 'COMPILING' : status;
+  const cls =
+    status === 'APPROVED' || status === 'PASSED' ? 'rc-pill-green'
+    : status === 'PENDING' || status === 'RUNNING' ? 'rc-pill-yellow'
+    : status === 'SKIPPED' ? 'rc-pill-gray'
+    : 'rc-pill-red';
+  const label = status === 'PENDING' ? 'WAITING' : status;
   return <span className={`rc-pill ${cls}`}>{label}</span>;
 }
 
@@ -48,40 +66,52 @@ function SeverityBadge({ sev }: { sev: string }) {
 export default function DashboardPage() {
   const [repoUrl, setRepoUrl]     = useState('');
   const [branch, setBranch]       = useState('main');
-  const [engine, setEngine]       = useState('Llama 3.3 Deep Static Analysis (SAST)');
+  const [engine, setEngine]       = useState(ENGINE_OPTIONS[0]);
   const [gates, setGates]         = useState(INITIAL_GATES);
   const [loading, setLoading]         = useState(false);
   const [patchLoading, setPatchLoading] = useState(false);
   const [patchToast, setPatchToast]   = useState<{type: 'success'|'error', msg: string, url?: string} | null>(null);
-  const [scanResult, setScanResult]   = useState<any>(null);
-  const [history, setHistory]         = useState<any[]>([]);
+  const [scanResult, setScanResult]   = useState<ScanResult | null>(null);
+  const [history, setHistory]         = useState<ScanResult[]>([]);
+  const [historyError, setHistoryError] = useState('');
   const [error, setError]             = useState('');
-  const [startTime]                   = useState(Date.now());
+  const [startTime]                   = useState<number>(() => Date.now());
+  const [now, setNow]                 = useState<number | null>(null);
+
+  // Session uptime — ticks every minute (external timer -> state)
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   // Fetch persistent scan history from DB on mount
   const loadHistory = useCallback(async () => {
     try {
-      const res  = await fetchApi('/api/scans');
-      const data = await res.json();
+      const data = await apiJson<ScanResult[]>('/api/scans');
       if (Array.isArray(data)) setHistory(data);
-    } catch (_e) { /* backend may not be running yet */ }
+      setHistoryError('');
+    } catch (e) {
+      setHistoryError(errorMessage(e, 'Could not load scan history.'));
+    }
   }, []);
 
-  useEffect(() => { loadHistory(); }, [loadHistory]);
+  useEffect(() => {
+    const controller = { cancelled: false };
+    // Network fetch -> state (async callback, not a synchronous setState)
+    Promise.resolve().then(() => { if (!controller.cancelled) loadHistory(); });
+    return () => { controller.cancelled = true; };
+  }, [loadHistory]);
 
   async function handleApprove(scanId: number) {
     setPatchLoading(true);
     setPatchToast(null);
     try {
-      const res  = await fetchApi(`/api/scans/${scanId}/apply-patch`, { method: 'POST' });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Failed to create PR');
-      setPatchToast({ type: 'success', msg: `<CheckCircle2 size={16} /> Pull Request created!`, url: data.pr_url });
-      // Refresh scanResult patch_status
-      setScanResult((prev: any) => prev ? { ...prev, patch_status: 'APPLIED' } : prev);
+      const data = await apiJson<{ pr_url?: string }>(`/api/scans/${scanId}/apply-patch`, { method: 'POST' });
+      setPatchToast({ type: 'success', msg: 'Pull Request created on GitHub.', url: data.pr_url });
+      setScanResult(prev => prev ? { ...prev, patch_status: 'APPLIED' } : prev);
       await loadHistory();
-    } catch (e: any) {
-      setPatchToast({ type: 'error', msg: `❌ ${e.message}` });
+    } catch (e) {
+      setPatchToast({ type: 'error', msg: errorMessage(e, 'Failed to create PR') });
     } finally {
       setPatchLoading(false);
     }
@@ -91,53 +121,65 @@ export default function DashboardPage() {
     setPatchLoading(true);
     setPatchToast(null);
     try {
-      await fetchApi(`/api/scans/${scanId}/reject-patch`, { method: 'POST' });
-      setPatchToast({ type: 'error', msg: '<X size={16} className="text-red-500" /> Patch rejected.' });
-      setScanResult((prev: any) => prev ? { ...prev, patch_status: 'REJECTED' } : prev);
+      await apiJson(`/api/scans/${scanId}/reject-patch`, { method: 'POST' });
+      setPatchToast({ type: 'error', msg: 'Patch rejected. No changes were pushed.' });
+      setScanResult(prev => prev ? { ...prev, patch_status: 'REJECTED' } : prev);
       await loadHistory();
-    } catch (e: any) {
-      setPatchToast({ type: 'error', msg: `❌ ${e.message}` });
+    } catch (e) {
+      setPatchToast({ type: 'error', msg: errorMessage(e, 'Failed to reject patch') });
     } finally {
       setPatchLoading(false);
     }
   }
 
   const criticalVulns = scanResult?.critical_count ?? 0;
-  const elapsedH      = Math.floor((Date.now() - startTime) / 3600000);
+  const elapsedMs     = now !== null ? now - startTime : 0;
+  const elapsedH      = Math.floor(elapsedMs / 3600000);
+  const elapsedD      = Math.floor(elapsedH / 24);
   const sessionScans  = history.length;
+  const blockedScans  = history.filter(s => s.gate === 'BLOCKED').length;
 
   async function handleScan() {
-    if (!repoUrl.trim()) { setError('Please enter a GitHub repository URL.'); return; }
+    const url = repoUrl.trim();
+    if (!url) { setError('Please enter a GitHub repository URL.'); return; }
+    if (!/^https:\/\/github\.com\/[A-Za-z0-9-]+\/[A-Za-z0-9._-]+\/?$/.test(url.replace(/\.git$/, ''))) {
+      setError('Enter a public GitHub repository URL in the form https://github.com/owner/repo');
+      return;
+    }
     setError('');
     setLoading(true);
     setScanResult(null);
-    setGates(INITIAL_GATES);
+    setPatchToast(null);
+    setGates({ ...INITIAL_GATES, webhook_ingestion: 'RUNNING' });
 
     try {
-      const res  = await fetchApi('/api/scan', {
+      const data = await apiJson<ScanResult>('/api/scan', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ repo_url: repoUrl, branch, engine }),
+        body:    JSON.stringify({ repo_url: url, branch, engine }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Scan failed');
 
       const verdict  = data.sandbox_verdict;
-      const aiOk     = data.explanation !== 'AI analysis failed.';
       const gatePass = data.gate === 'APPROVED';
 
       setScanResult(data);
       setGates({
-        webhook_ingestion:  'APPROVED',
-        ai_analysis:        aiOk ? (gatePass ? 'APPROVED' : 'FAILED') : 'FAILED',
-        sandbox_validation: verdict === 'PASS' || verdict === 'SKIPPED' ? 'APPROVED' : 'FAILED',
-        rasp_monitoring:    'APPROVED',
+        webhook_ingestion:  'PASSED',
+        ai_analysis:        gatePass ? 'APPROVED' : 'BLOCKED',
+        sandbox_validation: verdict === 'PASS' ? 'PASSED' : verdict === 'FAIL' || verdict === 'ERROR' ? 'FAILED' : 'SKIPPED',
+        rasp_monitoring:    'PASSED',
       });
-      // Reload history from DB to include the new scan
       await loadHistory();
-    } catch (e: any) {
-      setError(e.message);
-      setGates(g => ({ ...g, webhook_ingestion: 'FAILED' }));
+    } catch (e) {
+      const msg = errorMessage(e, 'Scan failed');
+      setError(msg);
+      const status = e instanceof ApiError ? e.status : 0;
+      // A 4xx from validation / download means ingestion failed; anything else means the AI stage failed.
+      if (status === 400 || status === 404 || status === 0) {
+        setGates({ ...INITIAL_GATES, webhook_ingestion: 'FAILED' });
+      } else {
+        setGates({ ...INITIAL_GATES, webhook_ingestion: 'PASSED', ai_analysis: 'FAILED' });
+      }
     } finally {
       setLoading(false);
     }
@@ -158,10 +200,10 @@ export default function DashboardPage() {
         {/* KPI Metrics */}
         <div className="rc-grid-4" style={{ marginBottom: 32 }}>
           {[
-            { label: 'Critical Vulns',  value: criticalVulns,    delta: criticalVulns === 0 ? '−100% (Clean)' : `+${criticalVulns} Active Issues`, up: criticalVulns === 0 },
-            { label: 'System Health',   value: '99.9%',          delta: '+0.2% (Optimized)', up: true },
+            { label: 'Critical Vulns',  value: criticalVulns,    delta: scanResult ? (criticalVulns === 0 ? 'Latest scan is clean' : `${criticalVulns} active issue(s)`) : 'Run a scan to populate', up: criticalVulns === 0 },
+            { label: 'Blocked Scans',    value: blockedScans,     delta: sessionScans ? `${Math.round(((sessionScans - blockedScans) / sessionScans) * 100)}% pass rate` : 'No scans yet', up: blockedScans === 0 },
             { label: 'Total Scans',     value: sessionScans,     delta: 'Persisted in DB',   up: true },
-            { label: 'Uptime',          value: `0d ${elapsedH}h`,delta: '100% Stability',    up: true },
+            { label: 'Session Uptime',  value: `${elapsedD}d ${elapsedH % 24}h`, delta: 'Current browser session', up: true },
           ].map(m => (
             <div key={m.label} className="rc-metric">
               <div className="rc-metric-label">{m.label}</div>
@@ -192,14 +234,18 @@ export default function DashboardPage() {
               <div>
                 <label className="rc-label">Analysis Engine Profile</label>
                 <select className="rc-select" value={engine} onChange={e => setEngine(e.target.value)}>
-                  {['Llama 3.3 Deep Static Analysis (SAST)', 'GPT-4 Code Core', 'Groq Fast Analysis'].map(o => <option key={o}>{o}</option>)}
+                  {ENGINE_OPTIONS.map(o => <option key={o}>{o}</option>)}
                 </select>
               </div>
             </div>
             <button className="rc-btn-primary" onClick={handleScan} disabled={loading} style={{ width: '100%', justifyContent: 'center' }}>
               {loading ? <><Hourglass size={16} /> Running 3-Stage AI Pipeline...</> : <><Zap size={16} /> INITIATE SCAN</>}
             </button>
-            {error && <div style={{ marginTop: 12, color: 'var(--red)', fontSize: '0.8rem', padding: '10px 14px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6 }}><AlertTriangle size={16} /> {error}</div>}
+            {error && (
+              <div style={{ marginTop: 12, color: 'var(--red)', fontSize: '0.8rem', padding: '10px 14px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6, display: 'flex', gap: 8, alignItems: 'flex-start', wordBreak: 'break-word' }}>
+                <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2 }} /> <span>{error}</span>
+              </div>
+            )}
           </div>
 
           {/* Gate Status */}
@@ -216,7 +262,7 @@ export default function DashboardPage() {
               {Object.entries(gates).map(([key, val]) => (
                 <div key={key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 6 }}>
                   <span style={{ fontSize: '0.82rem', color: 'var(--text-primary)' }}>{GATE_LABELS[key]}</span>
-                  <GatePill status={val as string} />
+                  <GatePill status={val} />
                 </div>
               ))}
             </div>
@@ -242,8 +288,10 @@ export default function DashboardPage() {
 
             {/* Summary */}
             <div style={{ marginBottom: 16, padding: '12px 16px', background: 'var(--bg-base)', borderRadius: 8, borderLeft: '3px solid var(--accent)' }}>
-              <div style={{ fontSize: '0.65rem', color: 'var(--accent)', fontWeight: 700, marginBottom: 6, letterSpacing: '0.8px' }}>● AI MULTI-AGENT ANALYSIS COMPLETE</div>
-              <p style={{ fontSize: '0.83rem', color: 'var(--text-secondary)', lineHeight: 1.7, margin: 0 }}>{scanResult.explanation}</p>
+              <div style={{ fontSize: '0.65rem', color: 'var(--accent)', fontWeight: 700, marginBottom: 6, letterSpacing: '0.8px' }}>
+                ● AI MULTI-AGENT ANALYSIS COMPLETE{scanResult.model ? ` — MODEL: ${scanResult.model.toUpperCase()}` : ''}{scanResult.files_analysed?.length ? ` — ${scanResult.files_analysed.length} FILE(S)` : ''}
+              </div>
+              <p style={{ fontSize: '0.83rem', color: 'var(--text-secondary)', lineHeight: 1.7, margin: 0, whiteSpace: 'pre-wrap' }}>{scanResult.explanation}</p>
             </div>
 
             {/* OWASP Findings Table */}
@@ -264,11 +312,11 @@ export default function DashboardPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {scanResult.findings.map((f: any, i: number) => (
+                    {scanResult.findings.map((f, i) => (
                       <tr key={i}>
                         <td data-label="Severity"><SeverityBadge sev={f.severity} /></td>
                         <td data-label="OWASP Class" style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{f.owasp_class}</td>
-                        <td data-label="File" style={{ fontFamily: 'monospace', fontSize: '0.72rem', color: 'var(--text-muted)' }}>{f.file_path?.split('/').pop()}</td>
+                        <td data-label="File" title={f.file_path} style={{ fontFamily: 'monospace', fontSize: '0.72rem', color: 'var(--text-muted)' }}>{f.file_path?.split('/').pop()}{f.line_start ? `:${f.line_start}` : ''}</td>
                         <td data-label="Description" style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>{f.description}</td>
                         <td data-label="Remediation" style={{ fontSize: '0.78rem', color: 'var(--green)' }}>{f.remediation}</td>
                       </tr>
@@ -285,7 +333,7 @@ export default function DashboardPage() {
                 <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px', color: 'var(--red)', marginBottom: 10 }}>
                   <AlertTriangle size={16} /> Pre-Scan Secrets Scanner — {scanResult.secret_findings.length} Hardcoded Secret(s) Detected
                 </div>
-                {scanResult.secret_findings.map((f: any, i: number) => (
+                {scanResult.secret_findings.map((f, i) => (
                   <div key={i} style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6, padding: '10px 14px', marginBottom: 6, fontFamily: 'monospace', fontSize: '0.78rem' }}>
                     <span style={{ color: 'var(--red)', fontWeight: 700 }}>[{f.pattern}]</span>
                     <span style={{ color: 'var(--text-muted)' }}> {f.file} : line {f.line}</span>
@@ -344,7 +392,9 @@ export default function DashboardPage() {
                     background: patchToast.type === 'success' ? 'rgba(20,209,120,0.1)' : 'rgba(239,68,68,0.08)',
                     border: `1px solid ${patchToast.type === 'success' ? 'rgba(20,209,120,0.3)' : 'rgba(239,68,68,0.3)'}`,
                     color: patchToast.type === 'success' ? 'var(--green)' : 'var(--red)',
+                    display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
                   }}>
+                    {patchToast.type === 'success' ? <CheckCircle2 size={16} /> : <X size={16} />}
                     {patchToast.msg}
                     {patchToast.url && (
                       <a href={patchToast.url} target="_blank" rel="noreferrer" style={{ marginLeft: 10, color: 'var(--accent)', textDecoration: 'underline' }}>
@@ -362,8 +412,9 @@ export default function DashboardPage() {
         <div className="rc-card" style={{ marginBottom: 24 }}>
           <div className="rc-card-hdr">
             <div className="rc-card-title">📦 Historical Evaluation Log Records</div>
-            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{history.length} scan(s) in database</span>
+            <span style={{ fontSize: '0.72rem', color: historyError ? 'var(--red)' : 'var(--text-muted)' }}>{historyError || `${history.length} scan(s) in database`}</span>
           </div>
+          <div className="rc-table-wrap">
           <table className="rc-table">
             <thead>
               <tr>
@@ -379,11 +430,11 @@ export default function DashboardPage() {
             </thead>
             <tbody>
               {history.length === 0 ? (
-                <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>No scan records yet. Trigger a scan above.</td></tr>
-              ) : history.map((s: any) => (
-                <tr key={s.id}>
+                <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>No scan records yet. Trigger a scan above.</td></tr>
+              ) : history.map((s) => (
+                <tr key={s.id} style={{ cursor: 'pointer' }} onClick={() => { setScanResult(s); setPatchToast(null); window.scrollTo({ top: 0, behavior: 'smooth' }); }} title="Click to view this scan report">
                   <td style={{ color: 'var(--text-primary)', fontSize: '0.8rem', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {s.repo_url.replace('https://github.com/', '')}
+                    {(s.repo_url || '').replace('https://github.com/', '')}
                   </td>
                   <td style={{ fontSize: '0.78rem' }}>{s.branch}</td>
                   <td style={{ fontSize: '0.75rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
@@ -392,7 +443,7 @@ export default function DashboardPage() {
                   <td><span style={{ color: s.critical_count > 0 ? 'var(--red)' : 'var(--green)', fontWeight: 700 }}>{s.critical_count}</span></td>
                   <td><span style={{ color: s.high_count > 0 ? '#f97316' : 'var(--green)', fontWeight: 700 }}>{s.high_count}</span></td>
                   <td><GatePill status={s.gate} /></td>
-                  <td style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{s.sandbox_verdict}</td>
+                  <td style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{s.sandbox_verdict || 'SKIPPED'}</td>
                   <td style={{ fontSize: '0.72rem', fontWeight: 700,
                     color: s.patch_status === 'APPLIED' ? 'var(--green)' : s.patch_status === 'REJECTED' ? 'var(--red)' : s.patch_status === 'PENDING' ? 'var(--accent)' : 'var(--text-muted)'
                   }}>{s.patch_status || 'N/A'}</td>
@@ -400,17 +451,18 @@ export default function DashboardPage() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
 
         {/* Predictive Threat Analysis */}
         <div className="rc-card" style={{ textAlign: 'center', padding: '48px 24px' }}>
-          <div style={{ fontSize: '2rem', marginBottom: 12 }}><Zap size={16} /></div>
+          <div style={{ marginBottom: 12, color: 'var(--accent)' }}><Zap size={32} /></div>
           <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 10 }}>Predictive Threat Analysis</div>
           <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', lineHeight: 1.7 }}>
             The ResilioCheck AI multi-agent engine processes repositories through OWASP classification,
             gate decision, and automated patch generation stages.<br />
             {history.length > 0
-              ? `${history.filter((s: any) => s.gate === 'APPROVED').length} of ${history.length} scan(s) passed all security gates.`
+              ? `${history.filter((s) => s.gate === 'APPROVED').length} of ${history.length} scan(s) passed all security gates.`
               : 'Submit a repository above to begin threat analysis.'}
           </div>
         </div>

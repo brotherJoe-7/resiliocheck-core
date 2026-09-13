@@ -1,11 +1,19 @@
 'use client';
-import { fetchApi } from '@/app/utils/apiClient';
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { apiJson, TOKEN_KEY, USER_KEY, UNAUTHORIZED_EVENT } from '@/app/utils/apiClient';
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 
 interface AuthUser {
   email: string;
   full_name: string;
   role: string;
+}
+
+interface AuthResponse {
+  access_token: string;
+  token_type: string;
+  role: string;
+  email: string;
+  full_name: string;
 }
 
 interface AuthContextType {
@@ -24,61 +32,74 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const storedToken = localStorage.getItem('rc_token');
-    const storedUser = localStorage.getItem('rc_user');
-    if (storedToken && storedUser) {
-      setToken(storedToken);
-      setUser(JSON.parse(storedUser));
+  const clearSession = useCallback(() => {
+    setToken(null);
+    setUser(null);
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(USER_KEY);
     }
-    setLoading(false);
   }, []);
 
+  useEffect(() => {
+    // Restore the persisted session (localStorage is an external system).
+    let restored: { token: string; user: AuthUser } | null = null;
+    try {
+      const storedToken = localStorage.getItem(TOKEN_KEY);
+      const storedUser = localStorage.getItem(USER_KEY);
+      if (storedToken && storedUser) restored = { token: storedToken, user: JSON.parse(storedUser) };
+    } catch {
+      restored = null;
+    }
+    const apply = () => {
+      if (restored) {
+        setToken(restored.token);
+        setUser(restored.user);
+      } else {
+        clearSession();
+      }
+      setLoading(false);
+    };
+    // Defer to the next tick so the state update is not synchronous inside the effect body.
+    const timer = setTimeout(apply, 0);
+
+    // Backend rejected the token (expired / server restarted) -> drop session.
+    const onUnauthorized = () => clearSession();
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+    };
+  }, [clearSession]);
+
+  function persist(data: AuthResponse) {
+    const u = { email: data.email, full_name: data.full_name, role: data.role };
+    setToken(data.access_token);
+    setUser(u);
+    localStorage.setItem(TOKEN_KEY, data.access_token);
+    localStorage.setItem(USER_KEY, JSON.stringify(u));
+  }
+
   async function login(email: string, password: string) {
-    const res = await fetchApi('/api/auth/login', {
+    const data = await apiJson<AuthResponse>('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
     });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || 'Login failed');
-    }
-    const data = await res.json();
-    const u = { email: data.email, full_name: data.full_name, role: data.role };
-    setToken(data.access_token);
-    setUser(u);
-    localStorage.setItem('rc_token', data.access_token);
-    localStorage.setItem('rc_user', JSON.stringify(u));
+    persist(data);
   }
 
   async function register(email: string, password: string, full_name: string) {
-    const res = await fetchApi('/api/auth/register', {
+    const data = await apiJson<AuthResponse>('/api/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password, full_name }),
     });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || 'Registration failed');
-    }
-    const data = await res.json();
-    const u = { email: data.email, full_name: data.full_name, role: data.role };
-    setToken(data.access_token);
-    setUser(u);
-    localStorage.setItem('rc_token', data.access_token);
-    localStorage.setItem('rc_user', JSON.stringify(u));
-  }
-
-  function logout() {
-    setToken(null);
-    setUser(null);
-    localStorage.removeItem('rc_token');
-    localStorage.removeItem('rc_user');
+    persist(data);
   }
 
   return (
-    <AuthContext.Provider value={{ user, token, login, register, logout, loading }}>
+    <AuthContext.Provider value={{ user, token, login, register, logout: clearSession, loading }}>
       {children}
     </AuthContext.Provider>
   );
