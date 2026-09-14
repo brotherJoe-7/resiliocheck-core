@@ -124,9 +124,13 @@ export default function SettingsPage() {
                   ) : (
                     <button 
                       className="rc-btn-secondary" 
-                      onClick={() => {
-                        const { getApiBaseUrl } = require('@/app/utils/apiClient');
-                        window.location.href = `${getApiBaseUrl()}/api/auth/github/login`;
+                      onClick={async () => {
+                        try {
+                          const data = await apiJson<{ url: string }>('/api/auth/github/oauth-url');
+                          window.location.href = data.url;
+                        } catch (e) {
+                          setMessage(e instanceof Error ? `GitHub error: ${e.message}` : 'Failed to connect GitHub.');
+                        }
                       }}
                     >
                       Connect

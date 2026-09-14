@@ -253,13 +253,17 @@ export default function DashboardPage() {
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <span>Only public repositories can be scanned.</span>
                   <button 
-                    onClick={() => {
-                      const { getApiBaseUrl } = require('@/app/utils/apiClient');
-                      window.location.href = `${getApiBaseUrl()}/api/auth/github/login`;
+                    onClick={async () => {
+                      try {
+                        const data = await apiJson<{ url: string }>('/api/auth/github/oauth-url');
+                        window.location.href = data.url;
+                      } catch (e) {
+                        setError('Could not initiate GitHub login. Please try again.');
+                      }
                     }} 
                     style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontWeight: 600, padding: 0 }}
                   >
-                    Connect GitHub to scan private repos →
+                    Connect GitHub to scan private repos &rarr;
                   </button>
                 </div>
               )}

@@ -148,6 +148,28 @@ def get_me(current_user: User = Depends(get_current_user)):
 import urllib.parse
 import requests as _http
 
+@router.get("/github/oauth-url")
+def github_oauth_url(current_user: User = Depends(get_current_user)):
+    """
+    Returns the GitHub OAuth authorization URL as JSON so the frontend can
+    redirect to it while still sending the bearer token via fetch().
+    The browser cannot attach Authorization headers to a plain window.location
+    redirect, so we use this two-step: fetch URL → JS redirect.
+    """
+    if not settings.GITHUB_CLIENT_ID:
+        raise HTTPException(
+            status_code=503,
+            detail="GitHub OAuth is not configured on this server. Contact your administrator.",
+        )
+    state = create_access_token({"sub": current_user.email, "role": current_user.role})
+    params = urllib.parse.urlencode({
+        "client_id": settings.GITHUB_CLIENT_ID,
+        "scope":     "repo read:user",
+        "state":     state,
+    })
+    return {"url": f"https://github.com/login/oauth/authorize?{params}"}
+
+
 @router.get("/github/login")
 def github_login(current_user: User = Depends(get_current_user)):
     """
