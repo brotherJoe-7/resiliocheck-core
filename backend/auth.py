@@ -97,10 +97,37 @@ class LoginRequest(BaseModel):
     password: str = Field(..., min_length=1, max_length=256)
 
 
+from fastapi import APIRouter, Depends, HTTPException, Request
+from collections import defaultdict
+import time
+
+class RateLimiter:
+    def __init__(self, max_calls: int, time_window: int):
+        self.max_calls = max_calls
+        self.time_window = time_window
+        self.clients = defaultdict(list)
+    
+    def __call__(self, request: Request):
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            ip = forwarded.split(",")[0].strip()
+        else:
+            ip = request.client.host if request.client else "unknown"
+            
+        now = time.time()
+        self.clients[ip] = [t for t in self.clients[ip] if now - t < self.time_window]
+        
+        if len(self.clients[ip]) >= self.max_calls:
+            raise HTTPException(status_code=429, detail="Too many attempts. Please try again later.")
+            
+        self.clients[ip].append(now)
+
+login_limiter = RateLimiter(max_calls=5, time_window=60)
+
 # ── Routes ───────────────────────────────────────────────────────────────────
 
 @router.post("/register")
-def register(req: RegisterRequest, db: Session = Depends(get_db)):
+def register(req: RegisterRequest, db: Session = Depends(get_db), _: None = Depends(login_limiter)):
     if db.query(User).filter(User.email == req.email.lower()).first():
         raise HTTPException(status_code=400, detail="Email already registered")
     # First user becomes superadmin automatically
@@ -118,7 +145,7 @@ def register(req: RegisterRequest, db: Session = Depends(get_db)):
     return {"access_token": token, "token_type": "bearer", "role": user.role, "email": user.email, "full_name": user.full_name}
 
 @router.post("/login")
-def login(req: LoginRequest, db: Session = Depends(get_db)):
+def login(req: LoginRequest, db: Session = Depends(get_db), _: None = Depends(login_limiter)):
     user = db.query(User).filter(User.email == req.email.lower()).first()
     if not user or not verify_password(req.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
