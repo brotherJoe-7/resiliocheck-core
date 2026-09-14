@@ -22,7 +22,7 @@ from backend.core import (
     run_local_sast_prefilter,
     validate_repo_url,
     validate_branch,
-    docker_available,
+    sandbox_status,
     docker_status,
 )
 from backend.langchain_pipeline import (

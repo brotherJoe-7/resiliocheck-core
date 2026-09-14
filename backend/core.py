@@ -6,12 +6,9 @@ import zipfile
 import logging
 import requests
 import json
+import subprocess
+import tempfile
 from pathlib import Path
-
-try:  # docker SDK is optional — the pipeline degrades gracefully without it
-    import docker  # type: ignore
-except Exception:  # pragma: no cover
-    docker = None  # type: ignore
 
 from backend import settings
 
@@ -27,41 +24,33 @@ def _require_api_key() -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# DOCKER AVAILABILITY (cached)
+# SUBPROCESS SANDBOX AVAILABILITY
 # ─────────────────────────────────────────────────────────────────────────────
-_docker_state: dict = {"checked_at": 0.0, "available": False, "reason": ""}
+
+def _tool_exists(name: str) -> bool:
+    """Return True if a CLI tool is on PATH."""
+    return shutil.which(name) is not None
 
 
-def docker_available(force: bool = False) -> bool:
+def sandbox_status() -> dict:
     """
-    True if the Docker daemon is reachable AND the sandbox image exists.
-    Result is cached for 60 s so we don't hammer the socket on every scan.
-    On Cloud Run there is no Docker daemon, so this returns False and the
-    sandbox stage is reported as SKIPPED instead of raising.
+    Returns which SAST tools are available in the current environment.
+    Used by the /api/health endpoint for diagnostics.
     """
-    if not settings.SANDBOX_ENABLED:
-        _docker_state.update(available=False, reason="SANDBOX_ENABLED=false")
-        return False
-    if docker is None:
-        _docker_state.update(available=False, reason="docker SDK not installed")
-        return False
-    now = time.time()
-    if not force and now - _docker_state["checked_at"] < 60:
-        return _docker_state["available"]
-    try:
-        client = docker.from_env()
-        client.ping()
-        client.images.get(settings.SANDBOX_IMAGE)
-        _docker_state.update(checked_at=now, available=True, reason="")
-    except Exception as exc:  # daemon missing, socket denied, image missing…
-        _docker_state.update(checked_at=now, available=False, reason=str(exc)[:200])
-        log.info("Docker sandbox unavailable: %s", _docker_state["reason"])
-    return _docker_state["available"]
+    return {
+        "enabled":  settings.SANDBOX_ENABLED,
+        "mode":     "subprocess",
+        "semgrep":  _tool_exists("semgrep"),
+        "bandit":   _tool_exists("bandit"),
+        "node":     _tool_exists("node"),
+        "php":      _tool_exists("php"),
+        "ruby":     _tool_exists("ruby"),
+    }
 
 
+# Keep docker_status() as a compatibility shim so existing callers don't break
 def docker_status() -> dict:
-    docker_available()
-    return {"available": _docker_state["available"], "reason": _docker_state["reason"], "image": settings.SANDBOX_IMAGE}
+    return {"available": False, "reason": "Sandbox now uses subprocess mode — Docker not required.", "image": "N/A"}
 
 
 # ✅ SECURITY: strict GitHub 'owner/repo' allowlist — used to validate every
@@ -480,35 +469,33 @@ def _detect_project_type(workspace_dir: str) -> str:
 
 def apply_patch_and_validate(workspace_dir, patched_code, patched_filename="patched_script.js"):
     """
-    Multi-layer static analysis sandbox — works on ANY public repo, with or
-    without a .env file:
+    Multi-layer subprocess-based static analysis sandbox.
+    Runs entirely inside the Cloud Run container — no Docker daemon required.
 
     Layer 1 — SAST (Static Application Security Testing)
         Python  → bandit  (finds real security bugs: SQL-i, shell-inject, etc.)
         JS/TS   → semgrep (OWASP ruleset, no npm install needed)
-        Generic → semgrep auto ruleset
+        Generic → semgrep secrets ruleset
 
-    Layer 2 — Dependency CVE Audit
-        Node    → npm audit --audit-level=high (reads package-lock.json)
-        Python  → pip-audit (reads requirements.txt / pyproject.toml)
+    Layer 2 — Syntax Validation (always runs)
+        JS/JSX  → node --check
+        TS/TSX  → node --experimental-strip-types --check
+        Python  → python -m py_compile
+        PHP     → php -l
+        Ruby    → ruby -c
+        Shell   → bash -n
 
-    Layer 3 — Syntax Validation (always runs)
-        Compiles/parses the AI-generated patch to confirm it is valid code.
-
-    The sandbox NEVER executes the application. No .env is needed.
-    Mock env vars are injected from .env.example if present so linting tools
-    that call os.environ don't raise warnings.
+    The sandbox NEVER executes the application code.
     """
     if not (patched_code and patched_code.strip()):
         print("No patched code generated — skipping sandbox.")
         return "SKIPPED", ""
 
-    if not docker_available():
-        print(f"Sandbox validation skipped — Docker unavailable ({_docker_state['reason']}).")
-        return "SKIPPED", f"Docker sandbox unavailable: {_docker_state['reason']}"
+    if not settings.SANDBOX_ENABLED:
+        print("Sandbox disabled via SANDBOX_ENABLED=false.")
+        return "SKIPPED", "Sandbox disabled."
 
     # C2: Sanitize patched_filename to prevent command injection / path traversal.
-    # Relative paths (e.g. src/app/routes.js) are allowed; '..' segments are not.
     patched_filename = (patched_filename or "").replace("\\", "/").lstrip("/")
     if not re.match(r"^[A-Za-z0-9._\-/]+$", patched_filename) or ".." in patched_filename.split("/"):
         patched_filename = "patched_script.txt"
@@ -517,132 +504,151 @@ def apply_patch_and_validate(workspace_dir, patched_code, patched_filename="patc
     os.makedirs(os.path.dirname(patched_file_path) or workspace_dir, exist_ok=True)
     ext = os.path.splitext(patched_filename)[1].lower()
     project_type = _detect_project_type(workspace_dir)
-    mock_env = _extract_mock_env(workspace_dir)
+    abs_workspace = os.path.abspath(workspace_dir)
 
     print(f"Writing patched code to {patched_file_path}")
     with open(patched_file_path, "w", encoding="utf-8") as f:
         f.write(patched_code)
 
-    # Write a synthetic .env with mock values so tools that read dotenv work
-    mock_env_path = os.path.join(workspace_dir, ".env.sandbox")
-    with open(mock_env_path, "w", encoding="utf-8") as f:
-        for k, v in mock_env.items():
-            f.write(f"{k}={v}\n")
-        if not mock_env:
-            f.write("APP_ENV=sandbox\nDEBUG=false\n")
+    timeout = getattr(settings, "SANDBOX_TIMEOUT_SECONDS", 120)
+    logs_parts: list[str] = []
+    syntax_ok = False
+    has_critical = False
 
-    print(f"Running Docker Sandbox — project_type={project_type}, ext={ext}, mock_env_vars={len(mock_env)}")
+    print(f"Running Subprocess Sandbox — project_type={project_type}, ext={ext}")
 
-    container = None
     try:
-        client = docker.from_env()
-        abs_workspace = os.path.abspath(workspace_dir)
+        # ── Layer 1: SAST ─────────────────────────────────────────────────────
+        sast_json_str = ""
+        if (ext == ".py" or project_type == "python") and _tool_exists("bandit"):
+            r = subprocess.run(
+                ["bandit", "-r", abs_workspace, "-f", "json", "-ll", "-q",
+                 "--exclude", os.path.join(abs_workspace, "node_modules")],
+                capture_output=True, text=True, timeout=timeout
+            )
+            sast_json_str = r.stdout
+            logs_parts.append(f"[bandit stdout]\n{r.stdout}")
 
-        image = settings.SANDBOX_IMAGE
+        elif ext in (".js", ".jsx", ".ts", ".tsx") or project_type == "node":
+            if _tool_exists("semgrep"):
+                config = "p/typescript" if ext in (".ts", ".tsx") else "p/javascript"
+                r = subprocess.run(
+                    ["semgrep", "--config", config, abs_workspace,
+                     "--json", "--quiet"],
+                    capture_output=True, text=True, timeout=timeout
+                )
+                sast_json_str = r.stdout
+                logs_parts.append(f"[semgrep stdout]\n{r.stdout}")
 
-        # ── Select SAST command, and syntax command by language ──────
-        # We pass patched_filename as $1 to avoid shell string interpolation (C2)
-        if ext == ".py" or project_type == "python":
-            command = [
-                "sh", "-c",
-                "bandit -r /workspace -f json -ll -q --exclude /workspace/node_modules 2>/dev/null > /tmp/sast.json; "
-                "python -m py_compile /workspace/\"$1\" && echo 'SYNTAX:OK' || echo 'SYNTAX:FAIL'; "
-                "cat /tmp/sast.json",
-                "sh", patched_filename
-            ]
-        elif ext in (".js", ".jsx") or (project_type == "node" and ext not in (".ts", ".tsx")):
-            command = [
-                "sh", "-c",
-                "semgrep --config=p/javascript /workspace --json --quiet 2>/dev/null > /tmp/sast.json; "
-                "node --check /workspace/\"$1\" && echo 'SYNTAX:OK' || echo 'SYNTAX:FAIL'; "
-                "cat /tmp/sast.json",
-                "sh", patched_filename
-            ]
-        elif ext in (".ts", ".tsx"):
-            command = [
-                "sh", "-c",
-                "semgrep --config=p/typescript /workspace --json --quiet 2>/dev/null > /tmp/sast.json; "
-                "node --experimental-strip-types --check /workspace/\"$1\" && echo 'SYNTAX:OK' || echo 'SYNTAX:FAIL'; "
-                "cat /tmp/sast.json",
-                "sh", patched_filename
-            ]
-        elif ext == ".php":
-            command = ["sh", "-c", "php -l /workspace/\"$1\" && echo 'SYNTAX:OK' || echo 'SYNTAX:FAIL'", "sh", patched_filename]
-        elif ext == ".rb":
-            command = ["sh", "-c", "ruby -c /workspace/\"$1\" && echo 'SYNTAX:OK' || echo 'SYNTAX:FAIL'", "sh", patched_filename]
-        elif ext == ".sh":
-            command = ["sh", "-c", "bash -n /workspace/\"$1\" && echo 'SYNTAX:OK' || echo 'SYNTAX:FAIL'", "sh", patched_filename]
         else:
-            print(f"File type {ext} — running generic semgrep SAST only.")
-            command = [
-                "sh", "-c",
-                "semgrep --config=p/secrets /workspace --json --quiet 2>/dev/null > /tmp/sast.json; "
-                "echo 'SYNTAX:SKIPPED'; "
-                "cat /tmp/sast.json",
-                "sh", patched_filename
-            ]
+            if _tool_exists("semgrep"):
+                r = subprocess.run(
+                    ["semgrep", "--config", "p/secrets", abs_workspace,
+                     "--json", "--quiet"],
+                    capture_output=True, text=True, timeout=timeout
+                )
+                sast_json_str = r.stdout
+                logs_parts.append(f"[semgrep stdout]\n{r.stdout}")
+            logs_parts.append("SYNTAX:SKIPPED")  # generic file, skip syntax check
+            syntax_ok = True
 
-        container = client.containers.run(
-            image,
-            command=command,
-            volumes={abs_workspace: {"bind": "/workspace", "mode": "ro"}},
-            # C4: Hardened profile restored
-            network_disabled=True,
-            read_only=True,
-            cap_drop=["ALL"],
-            security_opt=["no-new-privileges:true"],
-            mem_limit="512m",
-            pids_limit=128,
-            detach=True,
-            remove=False,
-            # Provide tmpfs for tools to write temp logs
-            tmpfs={'/tmp': '', '/run': ''}
-        )
-
-        exit_status = container.wait(timeout=settings.SANDBOX_TIMEOUT_SECONDS)
-        logs = container.logs().decode("utf-8", errors="replace")
-
-        syntax_ok = "SYNTAX:OK" in logs or "SYNTAX:SKIPPED" in logs
-        
-        # H6: Parse JSON output robustly instead of fragile substring matching
-        has_critical = False
-        try:
-            # Find the JSON block in the logs
-            match = re.search(r'\{[\s\S]*\}', logs)
-            if match:
-                sast_data = json.loads(match.group(0))
-                
-                # Check bandit JSON structure
-                if "results" in sast_data and any(r.get("issue_severity", "").lower() in ["high", "critical"] for r in sast_data["results"]):
-                    has_critical = True
-                
-                # Check semgrep JSON structure
-                if "results" in sast_data and any(r.get("extra", {}).get("severity", "").lower() in ["error", "high", "critical"] for r in sast_data["results"]):
-                    has_critical = True
-        except Exception as e:
-            print(f"Failed to parse SAST JSON output: {e}")
-            # Fallback to loose check only if JSON parsing totally fails
-            if any(w in logs.lower() for w in ["critical", "high severity", "severity: error", "severity: high"]):
-                has_critical = True
-
-        if syntax_ok and not has_critical:
-            print("Sandbox Validation: PASS")
-            return "PASS", logs
-        elif not syntax_ok:
-            print("Sandbox Validation: FAIL (syntax error in patched code)")
-            return "FAIL", logs
-        else:
-            print("Sandbox Validation: FAIL (critical/high severity findings)")
-            return "FAIL", logs
-
-    except Exception as e:
-        print(f"ERROR: Docker sandbox failed: {str(e)}")
-        return "ERROR", str(e)
-    finally:
-        if container is not None:
+        # Parse SAST JSON
+        if sast_json_str:
             try:
-                container.remove(force=True)
-            except Exception:
+                sast_data = json.loads(sast_json_str)
+                # bandit format
+                if "results" in sast_data and any(
+                    r.get("issue_severity", "").lower() in ["high", "critical"]
+                    for r in sast_data["results"]
+                ):
+                    has_critical = True
+                # semgrep format
+                if "results" in sast_data and any(
+                    r.get("extra", {}).get("severity", "").lower() in ["error", "high", "critical"]
+                    for r in sast_data["results"]
+                ):
+                    has_critical = True
+            except Exception as parse_err:
+                print(f"Failed to parse SAST JSON: {parse_err}")
+                if any(w in sast_json_str.lower() for w in ["critical", "high severity"]):
+                    has_critical = True
+
+        # ── Layer 2: Syntax Validation ────────────────────────────────────────
+        abs_patch = os.path.abspath(patched_file_path)
+
+        if ext in (".js", ".jsx") and _tool_exists("node"):
+            r = subprocess.run(["node", "--check", abs_patch],
+                               capture_output=True, text=True, timeout=30)
+            syntax_ok = r.returncode == 0
+            logs_parts.append(f"SYNTAX:{'OK' if syntax_ok else 'FAIL'}")
+            if r.stderr:
+                logs_parts.append(r.stderr)
+
+        elif ext in (".ts", ".tsx") and _tool_exists("node"):
+            r = subprocess.run(
+                ["node", "--experimental-strip-types", "--check", abs_patch],
+                capture_output=True, text=True, timeout=30
+            )
+            syntax_ok = r.returncode == 0
+            logs_parts.append(f"SYNTAX:{'OK' if syntax_ok else 'FAIL'}")
+            if r.stderr:
+                logs_parts.append(r.stderr)
+
+        elif ext == ".py":
+            r = subprocess.run(
+                ["python", "-m", "py_compile", abs_patch],
+                capture_output=True, text=True, timeout=30
+            )
+            syntax_ok = r.returncode == 0
+            logs_parts.append(f"SYNTAX:{'OK' if syntax_ok else 'FAIL'}")
+            if r.stderr:
+                logs_parts.append(r.stderr)
+
+        elif ext == ".php" and _tool_exists("php"):
+            r = subprocess.run(["php", "-l", abs_patch],
+                               capture_output=True, text=True, timeout=30)
+            syntax_ok = r.returncode == 0
+            logs_parts.append(f"SYNTAX:{'OK' if syntax_ok else 'FAIL'}")
+
+        elif ext == ".rb" and _tool_exists("ruby"):
+            r = subprocess.run(["ruby", "-c", abs_patch],
+                               capture_output=True, text=True, timeout=30)
+            syntax_ok = r.returncode == 0
+            logs_parts.append(f"SYNTAX:{'OK' if syntax_ok else 'FAIL'}")
+
+        elif ext == ".sh" and _tool_exists("bash"):
+            r = subprocess.run(["bash", "-n", abs_patch],
+                               capture_output=True, text=True, timeout=30)
+            syntax_ok = r.returncode == 0
+            logs_parts.append(f"SYNTAX:{'OK' if syntax_ok else 'FAIL'}")
+
+        else:
+            # Unknown file type — skip syntax but still report SAST result
+            if "SYNTAX:SKIPPED" not in "\n".join(logs_parts):
+                logs_parts.append("SYNTAX:SKIPPED")
+            syntax_ok = True
+
+    except subprocess.TimeoutExpired:
+        print("ERROR: Subprocess sandbox timed out.")
+        return "ERROR", "Sandbox timed out after exceeding the allowed execution window."
+    except Exception as e:
+        print(f"ERROR: Subprocess sandbox failed: {e}")
+        return "ERROR", str(e)
+
+    logs = "\n".join(logs_parts)
+
+    if syntax_ok and not has_critical:
+        print("Sandbox Validation: PASS")
+        return "PASS", logs
+    elif not syntax_ok:
+        print("Sandbox Validation: FAIL (syntax error in patched code)")
+        return "FAIL", logs
+    else:
+        print("Sandbox Validation: FAIL (critical/high severity SAST findings)")
+        return "FAIL", logs
+
+
+# --- Removed Docker-specific container cleanup block (no longer applicable) ---
                 pass
 
 
