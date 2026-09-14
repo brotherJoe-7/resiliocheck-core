@@ -77,11 +77,34 @@ export default function DashboardPage() {
   const [error, setError]             = useState('');
   const [startTime]                   = useState<number>(() => Date.now());
   const [now, setNow]                 = useState<number | null>(null);
+  const [githubConnected, setGithubConnected] = useState<boolean>(false);
 
-  // Session uptime — ticks every minute (external timer -> state)
+  // Parse OAuth redirect params and session uptime
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 60_000);
+    
+    // Check URL parameters for OAuth return
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const oauth = params.get('github_oauth');
+      if (oauth === 'success') {
+        setPatchToast({ type: 'success', msg: 'Successfully connected GitHub account!' });
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } else if (oauth === 'error') {
+        const reason = params.get('reason') || 'Unknown error';
+        setPatchToast({ type: 'error', msg: `GitHub connection failed: ${reason}` });
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    }
+
     return () => clearInterval(id);
+  }, []);
+
+  // Fetch current user details to check github_connected status
+  useEffect(() => {
+    apiJson<{ github_connected: boolean }>('/api/auth/me')
+      .then(me => setGithubConnected(me.github_connected))
+      .catch(() => setGithubConnected(false));
   }, []);
 
   // Fetch persistent scan history from DB on mount
@@ -221,8 +244,25 @@ export default function DashboardPage() {
               <div className="rc-card-title"><Zap size={16} /> Repository Target &amp; Configuration</div>
             </div>
             <div style={{ marginBottom: 14 }}>
-              <label className="rc-label">Repository URL Target</label>
+              <label className="rc-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>Repository URL Target</span>
+                {githubConnected && <span style={{ fontSize: '0.75rem', color: 'var(--green)', fontWeight: 600 }}><Check size={12} style={{ display: 'inline', marginBottom: -2 }} /> GitHub Connected</span>}
+              </label>
               <input className="rc-input" value={repoUrl} onChange={e => setRepoUrl(e.target.value)} placeholder="https://github.com/owner/repo" />
+              {!githubConnected && (
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span>Only public repositories can be scanned.</span>
+                  <button 
+                    onClick={() => {
+                      const { getApiBaseUrl } = require('@/app/utils/apiClient');
+                      window.location.href = `${getApiBaseUrl()}/api/auth/github/login`;
+                    }} 
+                    style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontWeight: 600, padding: 0 }}
+                  >
+                    Connect GitHub to scan private repos →
+                  </button>
+                </div>
+              )}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
               <div>
