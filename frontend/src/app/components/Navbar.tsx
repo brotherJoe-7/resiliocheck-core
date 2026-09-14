@@ -10,7 +10,7 @@ export default function Navbar({ activeItem }: { activeItem?: string }) {
 
   return (
     <>
-      <nav style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 48px', height: 60, borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, zIndex: 1000, background: 'rgba(9, 9, 11, 0.85)', backdropFilter: 'blur(12px)' }}>
+      <nav style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 48px', height: 60, borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, zIndex: 1000, background: 'var(--nav-bg)', backdropFilter: 'blur(12px)' }}>
         {/* Logo */}
         <Link href="/" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center' }}>
           <Image
