@@ -1,27 +1,6 @@
 import Link from 'next/link';
-import { Check, Shield, GitPullRequest, Code, Terminal, Server, Zap } from 'lucide-react';
+import { Check, Shield, GitPullRequest, Code, Terminal, Server, Zap, Lock, Brain } from 'lucide-react';
 import Navbar from './components/Navbar';
-
-const PLANS = [
-  {
-    name: 'Community', desc: 'Essential security checks for open-source projects.',
-    price: '$0', period: '/ forever', highlight: false,
-    features: ['Public repo scanning', 'Basic vulnerability DB', 'Community support'],
-    cta: 'Get Started', ctaPrimary: false,
-  },
-  {
-    name: 'Pro', desc: 'Advanced AI analysis for growing engineering teams.',
-    price: '$5', period: '/ user / month', highlight: true,
-    features: ['Private repo scanning', 'Real-time AI threat detection', 'CI/CD pipeline integration', 'Priority email support'],
-    cta: 'Start Free Trial', ctaPrimary: true,
-  },
-  {
-    name: 'Enterprise', desc: 'Custom deployments for high-compliance environments.',
-    price: 'Custom', period: '', highlight: false,
-    features: ['On-premise / VPC deployment', 'Custom AI model training', 'Dedicated security account manager', '24/7 phone support & SLA'],
-    cta: 'Contact Sales', ctaPrimary: false,
-  },
-];
 
 export default function LandingPage() {
   return (
@@ -73,8 +52,8 @@ export default function LandingPage() {
             <div style={{ background: '#09090b', border: '1px solid #27272a', borderRadius: 12, padding: 32, position: 'relative' }}>
               <div style={{ position: 'absolute', top: -16, left: 32, background: '#ea580c', color: 'white', width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '1.2rem' }}>2</div>
               <Terminal size={32} color="#a855f7" style={{ marginBottom: 20, marginTop: 10 }} />
-              <h3 style={{ fontSize: '1.3rem', color: '#fafafa', marginBottom: 12 }}>AI Sandbox Scanning</h3>
-              <p style={{ color: '#a1a1aa', fontSize: '0.95rem', lineHeight: 1.6 }}>The LangChain Multi-Agent engine pulls your code into a secure Docker sandbox to detect secrets and classify OWASP vulnerabilities.</p>
+              <h3 style={{ fontSize: '1.3rem', color: '#fafafa', marginBottom: 12 }}>AI Multi-Stage Scanning</h3>
+              <p style={{ color: '#a1a1aa', fontSize: '0.95rem', lineHeight: 1.6 }}>A three-agent LangChain pipeline downloads your code into a secure subprocess sandbox, runs Bandit & Semgrep SAST tools, then classifies findings across the full OWASP Top 10.</p>
             </div>
             
             <div style={{ background: '#09090b', border: '1px solid #27272a', borderRadius: 12, padding: 32, position: 'relative' }}>
@@ -151,46 +130,42 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Pricing Section */}
-      <section id="pricing" style={{ padding: 'clamp(60px, 8vw, 100px) clamp(20px, 5vw, 48px)', background: '#111113' }}>
-        <div style={{ textAlign: 'center', marginBottom: 64 }}>
-          <h2 style={{ fontSize: '2.5rem', fontWeight: 800, color: '#fafafa', letterSpacing: '-1px', marginBottom: 16 }}>
-            Transparent Pricing
+      {/* Research CTA Section */}
+      <section style={{ padding: 'clamp(60px, 8vw, 100px) clamp(20px, 5vw, 48px)', background: '#111113' }}>
+        <div style={{ maxWidth: 900, margin: '0 auto', textAlign: 'center' }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: 'rgba(20, 184, 166, 0.1)', border: '1px solid rgba(20, 184, 166, 0.2)', padding: '6px 14px', borderRadius: 20, color: '#14b8a6', fontSize: '0.8rem', fontWeight: 600, marginBottom: 24 }}>
+            <Brain size={14} /> University Research Project — Open Access
+          </div>
+          <h2 style={{ fontSize: 'clamp(2rem, 4vw, 3rem)', fontWeight: 800, color: '#fafafa', letterSpacing: '-1px', marginBottom: 20, lineHeight: 1.2 }}>
+            Try ResilioCheck AI <span style={{ color: '#ea580c' }}>Free Today</span>
           </h2>
-          <p style={{ fontSize: '1rem', color: '#a1a1aa', maxWidth: 560, margin: '0 auto', lineHeight: 1.7 }}>
-            Scale your DevSecOps pipeline with AI-driven threat detection. Plans for teams of all sizes.
+          <p style={{ color: '#a1a1aa', fontSize: '1.1rem', lineHeight: 1.7, marginBottom: 48, maxWidth: 650, margin: '0 auto 48px' }}>
+            ResilioCheck AI is a fully functional research prototype developed as a final-year university project.
+            Scan any public GitHub repository — no credit card, no subscription, no limits.
           </p>
-        </div>
 
-        <div className="rc-grid-3" style={{ maxWidth: 1000, margin: '0 auto' }}>
-          {PLANS.map(plan => (
-            <div key={plan.name} style={{ background: '#141417', border: plan.highlight ? '1px solid #ea580c' : '1px solid #27272a', borderRadius: 10, padding: '32px 28px', position: 'relative', display: 'flex', flexDirection: 'column' }}>
-              {plan.highlight && (
-                <div style={{ position: 'absolute', top: -12, left: '50%', transform: 'translateX(-50%)', background: '#ea580c', color: 'white', fontSize: '0.65rem', fontWeight: 700, padding: '4px 14px', borderRadius: 20, letterSpacing: '0.8px', textTransform: 'uppercase' }}>Most Popular</div>
-              )}
-              <div style={{ marginBottom: 8 }}>
-                <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#fafafa', marginBottom: 6 }}>{plan.name}</div>
-                <div style={{ fontSize: '0.8rem', color: '#a1a1aa', lineHeight: 1.5 }}>{plan.desc}</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 20, marginBottom: 48 }}>
+            {[
+              { icon: Lock, color: '#3b82f6', title: 'No Sign-Up Required', desc: 'Register a free account in seconds with just an email address.' },
+              { icon: Check, color: '#10b981', title: 'Full Feature Access', desc: 'Every feature — SAST scanning, AI analysis, and patch generation — is fully available.' },
+              { icon: Shield, color: '#ea580c', title: 'Private Repo Support', desc: 'Connect your GitHub account via OAuth to scan private repositories too.' },
+            ].map(f => (
+              <div key={f.title} style={{ padding: 24, background: '#09090b', border: '1px solid #27272a', borderRadius: 12, textAlign: 'left' }}>
+                <f.icon size={28} color={f.color} style={{ marginBottom: 12 }} />
+                <div style={{ fontWeight: 700, color: '#fafafa', marginBottom: 8 }}>{f.title}</div>
+                <div style={{ color: '#a1a1aa', fontSize: '0.88rem', lineHeight: 1.5 }}>{f.desc}</div>
               </div>
-              <div style={{ margin: '24px 0', borderTop: '1px solid #27272a', paddingTop: 24 }}>
-                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6 }}>
-                  <span style={{ fontSize: plan.price === 'Custom' ? '2rem' : '2.8rem', fontWeight: 800, color: '#fafafa', lineHeight: 1 }}>{plan.price}</span>
-                  {plan.period && <span style={{ fontSize: '0.78rem', color: '#71717a', marginBottom: 4 }}>{plan.period}</span>}
-                </div>
-              </div>
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 28 }}>
-                {plan.features.map(f => (
-                  <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '0.82rem', color: '#a1a1aa' }}>
-                    <span style={{ color: '#14b8a6', fontSize: '0.9rem', flexShrink: 0 }}><Check size={16} /></span>
-                    {f}
-                  </div>
-                ))}
-              </div>
-              <Link href="/register" style={{ display: 'flex', justifyContent: 'center', padding: '11px 20px', borderRadius: 6, fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer', textDecoration: 'none', background: plan.ctaPrimary ? '#ea580c' : 'transparent', color: plan.ctaPrimary ? 'white' : '#fafafa', border: plan.ctaPrimary ? 'none' : '1px solid #27272a', transition: 'opacity 0.15s' }}>
-                {plan.cta}
-              </Link>
-            </div>
-          ))}
+            ))}
+          </div>
+
+          <div style={{ display: 'flex', gap: 16, justifyContent: 'center', flexWrap: 'wrap' }}>
+            <Link href="/register" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#ea580c', color: 'white', padding: '14px 32px', borderRadius: 8, fontSize: '1rem', fontWeight: 700, textDecoration: 'none' }}>
+              <Zap size={18} /> Create Free Account
+            </Link>
+            <Link href="/login" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#18181b', color: '#fafafa', border: '1px solid #27272a', padding: '14px 32px', borderRadius: 8, fontSize: '1rem', fontWeight: 600, textDecoration: 'none' }}>
+              Sign In to Dashboard
+            </Link>
+          </div>
         </div>
       </section>
 
