@@ -107,6 +107,7 @@ ACCESS_TOKEN_EXPIRE_HOURS: int = _env_int("ACCESS_TOKEN_EXPIRE_HOURS", 24)
 
 # ── CORS ────────────────────────────────────────────────────────────────────
 FRONTEND_URL: str = _env("FRONTEND_URL", "http://localhost:3000")
+BACKEND_URL: str = _env("BACKEND_URL", "http://localhost:8000")
 
 # ── Database ────────────────────────────────────────────────────────────────
 DATABASE_URL: str = _env("DATABASE_URL", "sqlite:///./resiliocheck.db")

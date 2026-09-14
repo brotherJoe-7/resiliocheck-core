@@ -935,13 +935,86 @@ def add_monitored_repo(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    """Register a repo for continuous CI monitoring."""
+    """Register a repo for continuous CI monitoring and auto-setup the webhook."""
+    import requests
+
+    if not current_user.github_token:
+        raise HTTPException(
+            status_code=400,
+            detail="You must connect your GitHub account before enabling continuous monitoring."
+        )
+
     existing = db.query(models.MonitoredRepo).filter(
         models.MonitoredRepo.repo_url == req.repo_url
     ).first()
     if existing:
         raise HTTPException(status_code=409, detail="This repository is already being monitored.")
 
+    repo_full_name = req.repo_url.replace("https://github.com/", "")
+    webhook_url = f"{settings.BACKEND_URL.rstrip('/')}/api/webhooks/github"
+    headers = {
+        "Authorization": f"Bearer {current_user.github_token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    # 1. Create Webhook
+    # Check if webhook exists first
+    resp = requests.get(f"https://api.github.com/repos/{repo_full_name}/hooks", headers=headers)
+    if resp.status_code == 404:
+        raise HTTPException(status_code=404, detail=f"Repository {repo_full_name} not found or you lack admin access.")
+    elif resp.status_code != 200:
+        raise HTTPException(status_code=400, detail=f"GitHub API error: {resp.json().get('message')}")
+        
+    hooks = resp.json()
+    hook_exists = any(
+        h.get("config", {}).get("url") == webhook_url
+        for h in hooks if h.get("name") == "web"
+    )
+
+    if not hook_exists:
+        hook_payload = {
+            "name": "web",
+            "active": True,
+            "events": ["push", "pull_request"],
+            "config": {
+                "url": webhook_url,
+                "content_type": "json",
+                "secret": settings.GITHUB_WEBHOOK_SECRET,
+            }
+        }
+        create_resp = requests.post(
+            f"https://api.github.com/repos/{repo_full_name}/hooks",
+            headers=headers,
+            json=hook_payload
+        )
+        if create_resp.status_code not in (200, 201):
+            log.error("Failed to create webhook for %s: %s", repo_full_name, create_resp.text)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to create GitHub webhook. Ensure you have admin rights on the repository. ({create_resp.json().get('message')})"
+            )
+
+    # 2. Configure Branch Protection (Best effort)
+    protection_payload = {
+        "required_status_checks": {
+            "strict": True,
+            "contexts": ["ResilioCheck AI / security-scan"]
+        },
+        "enforce_admins": False,
+        "required_pull_request_reviews": None,
+        "restrictions": None
+    }
+    prot_resp = requests.put(
+        f"https://api.github.com/repos/{repo_full_name}/branches/{req.branch}/protection",
+        headers=headers,
+        json=protection_payload
+    )
+    if prot_resp.status_code not in (200, 201):
+        log.warning("Could not set branch protection on %s (branch %s): %s", repo_full_name, req.branch, prot_resp.text)
+        # We don't fail the request here because free-tier orgs can't protect branches on private repos.
+
+    # 3. Save to database
     repo = models.MonitoredRepo(
         user_id  = current_user.id,
         repo_url = req.repo_url,
@@ -950,7 +1023,8 @@ def add_monitored_repo(
     db.add(repo)
     db.commit()
     db.refresh(repo)
-    log.info("Monitored repo added: %s (branch=%s) by user %s", req.repo_url, req.branch, current_user.email)
+    log.info("Monitored repo auto-configured: %s (branch=%s) by user %s", req.repo_url, req.branch, current_user.email)
+    
     return {"status": "success", "repo": _monitored_to_dict(repo)}
 
 

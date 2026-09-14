@@ -138,9 +138,7 @@ export default function GatesPage() {
           </div>
 
           <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: 16, lineHeight: 1.6 }}>
-            Register repositories below. Every push will trigger an automatic scan and post a
-            <strong style={{ color: 'var(--text-secondary)' }}> commit status</strong> to GitHub —
-            blocking the merge if critical vulnerabilities are found.
+            Clicking <strong style={{ color: 'var(--accent)' }}>Monitor Repo</strong> will automatically configure GitHub webhooks and branch protection rules for your repository using your connected account. Every push will trigger an automatic scan and block the merge if critical vulnerabilities are found.
           </div>
 
           {/* Add form */}
@@ -192,13 +190,6 @@ export default function GatesPage() {
             </div>
           )}
 
-          {/* Webhook setup instructions */}
-          <div style={{ marginTop: 20, padding: '12px 16px', background: 'rgba(234,88,12,0.06)', border: '1px solid rgba(234,88,12,0.2)', borderRadius: 8, fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.7 }}>
-            <strong style={{ color: 'var(--accent)' }}>⚡ Webhook Setup</strong> — In each GitHub repo: <strong>Settings → Webhooks → Add Webhook</strong><br />
-            Payload URL: <code style={{ background: 'var(--bg-base)', padding: '1px 6px', borderRadius: 4 }}>{getApiBaseUrl()}/api/webhooks/github</code> &nbsp;·&nbsp;
-            Content type: <code style={{ background: 'var(--bg-base)', padding: '1px 6px', borderRadius: 4 }}>application/json</code> &nbsp;·&nbsp;
-            Events: <strong>Pushes</strong> + <strong>Pull requests</strong>
-          </div>
         </div>
 
         {loading ? (
