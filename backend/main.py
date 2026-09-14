@@ -56,6 +56,7 @@ def _ensure_columns() -> None:
             "patched_filename": "VARCHAR DEFAULT ''",
             "patch_status":     "VARCHAR DEFAULT 'PENDING'",
             "model":            "VARCHAR DEFAULT ''",
+            "user_id":          "INTEGER",
         },
         "users": {
             "scan_count":    "INTEGER DEFAULT 0",
@@ -123,6 +124,22 @@ async def _unhandled_error_handler(_request: Request, exc: Exception):
     log.exception("Unhandled error: %s", exc)
     return JSONResponse(status_code=500, content={"detail": "Internal server error. Please try again."})
 
+
+@app.middleware("http")
+async def _audit_middleware(request: Request, call_next):
+    """Prompt 3 — Log every request and any error responses for security monitoring."""
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    client_ip = forwarded.split(",")[0].strip() if forwarded else (
+        request.client.host if request.client else "unknown"
+    )
+    log.info("REQUEST  %s %s  ip=%s", request.method, request.url.path, client_ip)
+    response = await call_next(request)
+    if response.status_code >= 400:
+        log.warning(
+            "RESPONSE %s %s  ip=%s  status=%d",
+            request.method, request.url.path, client_ip, response.status_code,
+        )
+    return response
 
 # ---------------------------------------------------------------------------
 # DB SEEDING — populate default gates & agents on first run
@@ -458,6 +475,7 @@ async def run_scan(req: ScanRequest, db: Session = Depends(get_db),
             sandbox_verdict  = outcome["sandbox_verdict"],
             patch_status     = "PENDING" if patched_code else "N/A",
             model            = pipeline_result.get("model", ""),
+            user_id          = current_user.id,
         )
         db.add(result)
 
@@ -512,8 +530,14 @@ async def run_scan(req: ScanRequest, db: Session = Depends(get_db),
 
 @app.get("/api/scans")
 def get_scan_history(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    """Return all past scan results, newest first."""
-    scans = db.query(models.ScanResult).order_by(models.ScanResult.id.desc()).limit(50).all()
+    """
+    Prompt 4 (IDOR) — Return only scans that belong to the current user.
+    Admins and superadmins can see all scans for oversight.
+    """
+    query = db.query(models.ScanResult)
+    if current_user.role not in ("admin", "superadmin"):
+        query = query.filter(models.ScanResult.user_id == current_user.id)
+    scans = query.order_by(models.ScanResult.id.desc()).limit(50).all()
     return [_scan_to_dict(s) for s in scans]
 
 
@@ -531,6 +555,9 @@ def apply_patch_pr(scan_id: int, db: Session = Depends(get_db), current_user: mo
     scan = db.query(models.ScanResult).filter(models.ScanResult.id == scan_id).first()
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
+    # Prompt 4 (IDOR) — Verify the requesting user owns this scan (admins are exempt).
+    if current_user.role not in ("admin", "superadmin") and getattr(scan, "user_id", None) != current_user.id:
+        raise HTTPException(status_code=403, detail="You do not have permission to modify this scan.")
     if not scan.patched_code:
         raise HTTPException(status_code=400, detail="No patch available for this scan")
     if getattr(scan, "patch_status", "PENDING") == "APPLIED":
@@ -646,6 +673,9 @@ def reject_patch(scan_id: int, db: Session = Depends(get_db), current_user: mode
     scan = db.query(models.ScanResult).filter(models.ScanResult.id == scan_id).first()
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
+    # Prompt 4 (IDOR) — Verify the requesting user owns this scan.
+    if current_user.role not in ("admin", "superadmin") and getattr(scan, "user_id", None) != current_user.id:
+        raise HTTPException(status_code=403, detail="You do not have permission to modify this scan.")
     if not scan.patched_code:
         raise HTTPException(status_code=400, detail="No patch available for this scan")
     if scan.patch_status == "APPLIED":

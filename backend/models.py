@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, JSON
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, JSON, ForeignKey
 from sqlalchemy.sql import func
 from backend.database import Base
 
@@ -40,6 +40,8 @@ class ScanResult(Base):
     sandbox_verdict = Column(String, default="SKIPPED")
     model           = Column(String, default="")           # Groq model that produced the analysis
     scanned_at      = Column(DateTime(timezone=True), server_default=func.now())
+    # Owner — links scan to the user who initiated it (IDOR protection).
+    user_id         = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
 
 
 class Gate(Base):

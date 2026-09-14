@@ -145,14 +145,21 @@ def register(req: RegisterRequest, db: Session = Depends(get_db), _: None = Depe
     return {"access_token": token, "token_type": "bearer", "role": user.role, "email": user.email, "full_name": user.full_name}
 
 @router.post("/login")
-def login(req: LoginRequest, db: Session = Depends(get_db), _: None = Depends(login_limiter)):
+def login(req: LoginRequest, request: Request, db: Session = Depends(get_db), _: None = Depends(login_limiter)):
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    client_ip = forwarded.split(",")[0].strip() if forwarded else (
+        request.client.host if request.client else "unknown"
+    )
     user = db.query(User).filter(User.email == req.email.lower()).first()
     if not user or not verify_password(req.password, user.hashed_password):
+        log.warning("AUTH_FAILURE  ip=%s  email=%s  reason=bad_credentials", client_ip, req.email.lower())
         raise HTTPException(status_code=401, detail="Invalid email or password")
     if not user.is_active:
+        log.warning("AUTH_FAILURE  ip=%s  email=%s  reason=account_inactive", client_ip, req.email.lower())
         raise HTTPException(status_code=403, detail="Account is deactivated")
     user.last_login = datetime.now(timezone.utc)
     db.commit()
+    log.info("AUTH_SUCCESS  ip=%s  email=%s  role=%s", client_ip, user.email, user.role)
     token = create_access_token({"sub": user.email, "role": user.role})
     return {"access_token": token, "token_type": "bearer", "role": user.role, "email": user.email, "full_name": user.full_name}
 
