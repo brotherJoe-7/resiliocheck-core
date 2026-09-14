@@ -39,9 +39,9 @@ export default function DocumentationPage() {
             <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>Get up and running in under 5 minutes.</p>
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '20px 24px', fontFamily: 'monospace', fontSize: '0.85rem' }}>
               <div style={{ color: 'var(--text-muted)', marginBottom: 8 }}># 1. Start the backend</div>
-              <div style={{ color: '#e4e4e7', marginBottom: 16 }}>uvicorn backend.main:app --reload --port 8000</div>
+              <div style={{ color: 'var(--text-primary)', marginBottom: 16 }}>uvicorn backend.main:app --reload --port 8000</div>
               <div style={{ color: 'var(--text-muted)', marginBottom: 8 }}># 2. Start the frontend</div>
-              <div style={{ color: '#e4e4e7', marginBottom: 16 }}>cd frontend && npm run dev</div>
+              <div style={{ color: 'var(--text-primary)', marginBottom: 16 }}>cd frontend && npm run dev</div>
               <div style={{ color: 'var(--text-muted)', marginBottom: 8 }}># 3. Open the dashboard</div>
               <div style={{ color: 'var(--accent)' }}>http://localhost:3000</div>
             </div>
@@ -59,10 +59,10 @@ export default function DocumentationPage() {
               { method: 'GET', path: '/api/gates', desc: 'Retrieve configuration and status of all security gates.' },
               { method: 'GET', path: '/api/admin/users', desc: 'SuperAdmin only: list all platform users.' },
             ].map(e => (
-              <div key={e.path} style={{ display: 'flex', alignItems: 'flex-start', gap: 16, padding: '14px 0', borderBottom: '1px solid #1c1c1e' }}>
-                <span style={{ background: e.method === 'GET' ? 'rgba(20,184,166,0.15)' : 'rgba(234,88,12,0.15)', color: e.method === 'GET' ? '#14b8a6' : 'var(--accent)', fontFamily: 'monospace', fontWeight: 700, fontSize: '0.72rem', padding: '3px 8px', borderRadius: 4, minWidth: 48, textAlign: 'center' }}>{e.method}</span>
+              <div key={e.path} style={{ display: 'flex', alignItems: 'flex-start', gap: 16, padding: '14px 0', borderBottom: '1px solid var(--border)' }}>
+                <span style={{ background: e.method === 'GET' ? 'rgba(20,184,166,0.15)' : 'rgba(var(--accent-rgb, 234,88,12),0.15)', color: e.method === 'GET' ? '#14b8a6' : 'var(--accent)', fontFamily: 'monospace', fontWeight: 700, fontSize: '0.72rem', padding: '3px 8px', borderRadius: 4, minWidth: 48, textAlign: 'center' }}>{e.method}</span>
                 <div>
-                  <div style={{ fontFamily: 'monospace', fontSize: '0.85rem', color: '#e4e4e7', marginBottom: 4 }}>{e.path}</div>
+                  <div style={{ fontFamily: 'monospace', fontSize: '0.85rem', color: 'var(--text-primary)', marginBottom: 4 }}>{e.path}</div>
                   <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>{e.desc}</div>
                 </div>
               </div>
@@ -72,7 +72,7 @@ export default function DocumentationPage() {
           <section id="cicd" style={{ marginBottom: 64 }}>
             <h2 style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: 20, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>CI/CD Integration (GitHub Actions)</h2>
             <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>Add this step to your <code style={{ background: 'var(--bg-card-hover)', padding: '2px 6px', borderRadius: 4 }}>.github/workflows/ci.yml</code>:</p>
-            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '20px 24px', fontFamily: 'monospace', fontSize: '0.82rem', color: '#e4e4e7', whiteSpace: 'pre' }}>{`- name: ResilioCheck AI Scan
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '20px 24px', fontFamily: 'monospace', fontSize: '0.82rem', color: 'var(--text-primary)', whiteSpace: 'pre' }}>{`- name: ResilioCheck AI Scan
   uses: actions/github-script@v6
   with:
     script: |
