@@ -143,24 +143,23 @@ export default function SettingsPage() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
               <div className="rc-card" style={{ border: '1px solid var(--accent)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                  <div style={{ fontSize: '1.1rem', fontWeight: 700 }}>{settings.plan.name}</div>
-                  <div className="rc-pill rc-pill-orange">{settings.plan.status}</div>
+                  <div style={{ fontSize: '1.1rem', fontWeight: 700 }}>Resource Usage</div>
+                  <div className="rc-pill rc-pill-green">Active</div>
                 </div>
                 
-                <div style={{ fontSize: '2rem', fontWeight: 800, marginBottom: 4 }}>${settings.plan.price}<span style={{ fontSize: '1rem', color: 'var(--text-muted)' }}>/{settings.plan.period}</span></div>
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 20 }}>{settings.plan.billing_cycle}</div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 20 }}>
+                  LLM API usage and workspace limits for this university project.
+                </div>
                 
                 <div style={{ marginBottom: 16 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: 6 }}>
-                    <span>Developer Seats ({settings.plan.seats_used}/{settings.plan.seats_total})</span>
-                    <span style={{ fontWeight: 600 }}>{Math.round((settings.plan.seats_used / settings.plan.seats_total) * 100)}%</span>
+                    <span>Monthly LLM Scan Budget</span>
+                    <span style={{ fontWeight: 600 }}>{settings.plan?.seats_used || 0} / 100 Scans</span>
                   </div>
                   <div style={{ width: '100%', height: 6, background: 'var(--bg-base)', borderRadius: 3, overflow: 'hidden' }}>
-                    <div style={{ width: `${(settings.plan.seats_used / settings.plan.seats_total) * 100}%`, height: '100%', background: 'var(--accent)' }} />
+                    <div style={{ width: `${Math.min(((settings.plan?.seats_used || 0) / 100) * 100, 100)}%`, height: '100%', background: 'var(--accent)' }} />
                   </div>
                 </div>
-                
-                <button className="rc-btn-secondary" style={{ width: '100%' }} onClick={() => alert('Billing portal is coming soon.')}>Manage Billing</button>
               </div>
 
               {(user?.role === 'admin' || user?.role === 'superadmin') && (
