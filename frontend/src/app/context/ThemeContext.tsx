@@ -24,7 +24,7 @@ export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     const fetchTheme = async () => {
       try {
-        const data = await apiJson('/api/settings');
+        const data = await apiJson('/api/settings') as { theme?: string; mode?: string };
         const t = data.theme || 'orange';
         const m = data.mode || 'dark';
         setThemeState(t);
