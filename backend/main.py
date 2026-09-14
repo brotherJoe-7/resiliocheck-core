@@ -228,15 +228,56 @@ def seed_defaults(db: Session):
 # SCHEMA
 # ---------------------------------------------------------------------------
 
+import html
+from pydantic import BaseModel, Field, field_validator
+
+_BRANCH_RE = re.compile(r'^[A-Za-z0-9._\-/]{1,120}$')
+_SAFE_TEXT_RE = re.compile(r'[<>"\']')  # reject HTML injection chars in free-text
+
+_VALID_ENGINES = {
+    "Groq GPT-OSS 120B Deep Static Analysis (SAST)",
+    "Groq GPT-OSS 20B Fast Static Analysis (SAST)",
+    "Qwen 27B Deep Static Analysis (SAST)",
+    "Llama 3.3 Deep Static Analysis (SAST)",
+}
+
+def _sanitize_text(value: str, max_len: int = 256) -> str:
+    """Strip HTML injection characters and enforce length."""
+    value = value.strip()[:max_len]
+    value = _SAFE_TEXT_RE.sub('', value)
+    return value
+
+
 class ScanRequest(BaseModel):
     repo_url: str = Field(..., min_length=10, max_length=300)
-    branch: str = Field("main", max_length=120)
-    engine: str = Field("Groq GPT-OSS 120B Deep Static Analysis (SAST)", max_length=120)
+    branch:   str = Field("main", max_length=120)
+    engine:   str = Field("Groq GPT-OSS 120B Deep Static Analysis (SAST)", max_length=120)
+
+    @field_validator('branch')
+    @classmethod
+    def branch_must_be_safe(cls, v: str) -> str:
+        v = v.strip()
+        if not _BRANCH_RE.match(v):
+            raise ValueError('Branch name contains invalid characters. Only alphanumeric, dot, dash, underscore, and slash are allowed.')
+        return v
+
+    @field_validator('engine')
+    @classmethod
+    def engine_must_be_known(cls, v: str) -> str:
+        if v not in _VALID_ENGINES:
+            # Accept unknown engines but sanitize to prevent injection
+            return _sanitize_text(v, 120)
+        return v
 
 
 class SettingsUpdate(BaseModel):
     workspace: str = Field(..., min_length=1, max_length=120)
-    timezone: str = Field(..., min_length=1, max_length=120)
+    timezone:  str = Field(..., min_length=1, max_length=120)
+
+    @field_validator('workspace', 'timezone')
+    @classmethod
+    def sanitize_fields(cls, v: str) -> str:
+        return _sanitize_text(v, 120)
 
 
 # ---------------------------------------------------------------------------
@@ -692,10 +733,15 @@ def get_gates(db: Session = Depends(get_db), current_user: models.User = Depends
     return [_gate_to_dict(g) for g in db.query(models.Gate).all()]
 
 class GateCreate(BaseModel):
-    name: str = Field(..., min_length=2, max_length=80)
-    desc: str = Field("", max_length=400)
+    name:       str = Field(..., min_length=2, max_length=80)
+    desc:       str = Field("", max_length=400)
     strictness: list[str] | str = Field(default_factory=list)
-    action: list[str] | str = Field(default_factory=list)
+    action:     list[str] | str = Field(default_factory=list)
+
+    @field_validator('name', 'desc')
+    @classmethod
+    def sanitize_gate_fields(cls, v: str) -> str:
+        return _sanitize_text(v, 400)
 
 @app.post("/api/gates")
 def create_gate(gate_in: GateCreate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):

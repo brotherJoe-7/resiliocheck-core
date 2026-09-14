@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 import bcrypt
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from backend import settings
 from backend.database import get_db
 from backend.models import User
@@ -92,6 +92,11 @@ class RegisterRequest(BaseModel):
     password: str = Field(..., min_length=8)
     full_name: str = ""
 
+    @field_validator('full_name')
+    @classmethod
+    def sanitize_full_name(cls, v: str) -> str:
+        return _re.compile(r'[<>"\']').sub('', v.strip())[:120]
+
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=1, max_length=256)
@@ -100,6 +105,12 @@ class LoginRequest(BaseModel):
 from fastapi import APIRouter, Depends, HTTPException, Request
 from collections import defaultdict
 import time
+import re as _re
+
+_SAFE_TEXT_RE = _re.compile(r'[<>"\']')
+
+def _sanitize(value: str, max_len: int = 256) -> str:
+    return _SAFE_TEXT_RE.sub('', value.strip())[:max_len]
 
 class RateLimiter:
     def __init__(self, max_calls: int, time_window: int):
