@@ -12,20 +12,20 @@ const sections = [
 
 export default function TermsPage() {
   return (
-    <div style={{ minHeight: '100vh', background: '#09090b', color: '#fafafa', fontFamily: 'Inter, sans-serif' }}>
+    <div style={{ minHeight: '100vh', background: 'var(--bg-base)', color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif' }}>
       <Navbar />
       <div style={{ maxWidth: 760, margin: '0 auto', padding: '64px 24px 80px' }}>
-        <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#52525b', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 12 }}>Legal</div>
+        <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 12 }}>Legal</div>
         <h1 style={{ fontSize: '2.2rem', fontWeight: 800, marginBottom: 8 }}>Terms of Service</h1>
-        <p style={{ color: '#52525b', marginBottom: 56, fontSize: '0.85rem' }}>Last updated: August 27, 2026</p>
+        <p style={{ color: 'var(--text-muted)', marginBottom: 56, fontSize: '0.85rem' }}>Last updated: August 27, 2026</p>
         {sections.map(([heading, body]) => (
           <section key={heading} style={{ marginBottom: 40 }}>
             <h2 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 12, color: '#e4e4e7' }}>{heading}</h2>
-            <p style={{ fontSize: '0.9rem', color: '#a1a1aa', lineHeight: 1.9, marginTop: 0 }}>{body}</p>
+            <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: 1.9, marginTop: 0 }}>{body}</p>
           </section>
         ))}
-        <div style={{ marginTop: 48, paddingTop: 24, borderTop: '1px solid #27272a' }}>
-          <Link href="/" style={{ color: '#ea580c', textDecoration: 'none', fontSize: '0.85rem' }}>← Back to Home</Link>
+        <div style={{ marginTop: 48, paddingTop: 24, borderTop: '1px solid var(--border)' }}>
+          <Link href="/" style={{ color: 'var(--accent)', textDecoration: 'none', fontSize: '0.85rem' }}>← Back to Home</Link>
         </div>
       </div>
     </div>

@@ -277,6 +277,7 @@ class SettingsUpdate(BaseModel):
     workspace: str = Field(..., min_length=1, max_length=120)
     timezone:  str = Field(..., min_length=1, max_length=120)
     theme:     str = Field("orange", max_length=20)
+    mode:      str = Field("dark", max_length=10)
 
     @field_validator('workspace', 'timezone')
     @classmethod
@@ -852,6 +853,7 @@ _settings = {
     "workspace": "ResilioCheck AI DevSecOps",
     "timezone":  "UTC (Coordinated Universal Time)",
     "theme":     "orange",
+    "mode":      "dark",
     "plan": {
         "name":          "Pro Plan",
         "price":         5,
@@ -882,6 +884,7 @@ def update_settings(s: SettingsUpdate, current_user: models.User = Depends(get_c
     _settings["workspace"] = s.workspace
     _settings["timezone"]  = s.timezone
     _settings["theme"]     = s.theme
+    _settings["mode"]      = s.mode
     return {"status": "success"}
 
 

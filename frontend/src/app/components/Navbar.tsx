@@ -10,7 +10,7 @@ export default function Navbar({ activeItem }: { activeItem?: string }) {
 
   return (
     <>
-      <nav style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 48px', height: 60, borderBottom: '1px solid #27272a', position: 'sticky', top: 0, zIndex: 1000, background: 'rgba(9, 9, 11, 0.85)', backdropFilter: 'blur(12px)' }}>
+      <nav style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 48px', height: 60, borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, zIndex: 1000, background: 'rgba(9, 9, 11, 0.85)', backdropFilter: 'blur(12px)' }}>
         {/* Logo */}
         <Link href="/" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center' }}>
           <Image
@@ -24,7 +24,7 @@ export default function Navbar({ activeItem }: { activeItem?: string }) {
         </Link>
 
         {/* Desktop nav links */}
-        <div style={{ display: 'flex', gap: 32, fontSize: '0.85rem', color: '#a1a1aa' }} className="rc-desktop-nav">
+        <div style={{ display: 'flex', gap: 32, fontSize: '0.85rem', color: 'var(--text-secondary)' }} className="rc-desktop-nav">
           {NAV_ITEMS.map(item => {
             const isActive = activeItem === item;
             const href = item === 'Platform' ? '/' : `/${item.toLowerCase()}`;
@@ -32,7 +32,7 @@ export default function Navbar({ activeItem }: { activeItem?: string }) {
               <Link
                 key={item}
                 href={href}
-                style={{ color: isActive ? '#ea580c' : '#a1a1aa', textDecoration: isActive ? 'underline' : 'none', textUnderlineOffset: 4, cursor: 'pointer', transition: 'color 0.15s' }}
+                style={{ color: isActive ? 'var(--accent)' : 'var(--text-secondary)', textDecoration: isActive ? 'underline' : 'none', textUnderlineOffset: 4, cursor: 'pointer', transition: 'color 0.15s' }}
               >
                 {item}
               </Link>
@@ -42,8 +42,8 @@ export default function Navbar({ activeItem }: { activeItem?: string }) {
 
         {/* Desktop CTAs */}
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }} className="rc-desktop-nav">
-          <Link href="/login" style={{ fontSize: '0.82rem', color: '#a1a1aa', textDecoration: 'none' }}>Console Login</Link>
-          <Link href="/register" style={{ background: '#ea580c', color: 'white', border: 'none', borderRadius: 6, padding: '8px 18px', fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer', textDecoration: 'none' }}>Request Access</Link>
+          <Link href="/login" style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', textDecoration: 'none' }}>Console Login</Link>
+          <Link href="/register" style={{ background: 'var(--accent)', color: 'white', border: 'none', borderRadius: 6, padding: '8px 18px', fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer', textDecoration: 'none' }}>Request Access</Link>
         </div>
 
         {/* Mobile hamburger button */}

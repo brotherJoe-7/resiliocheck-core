@@ -8,7 +8,7 @@ import Sidebar from '../../components/Sidebar';
 
 export default function SettingsPage() {
   const { user } = useAuth();
-  const { theme, setTheme } = useTheme();
+  const { theme, mode, setTheme, setMode } = useTheme();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [workspace, setWorkspace] = useState('');
   const [timezone, setTimezone] = useState('');
@@ -43,7 +43,7 @@ export default function SettingsPage() {
       await apiJson('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workspace, timezone, theme })
+        body: JSON.stringify({ workspace, timezone, theme, mode })
       });
       setMessage('Settings saved successfully.');
     } catch (err) {
@@ -76,23 +76,46 @@ export default function SettingsPage() {
                 
                 <div style={{ marginBottom: 16 }}>
                   <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: 8 }}>Theme Color</label>
-                  <div style={{ display: 'flex', gap: 12 }}>
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                     {[
                       { id: 'orange', color: '#ea580c' },
-                      { id: 'blue', color: '#3b82f6' },
+                      { id: 'blue',   color: '#3b82f6' },
                       { id: 'purple', color: '#a855f7' },
-                      { id: 'green', color: '#10b981' }
+                      { id: 'green',  color: '#10b981' }
                     ].map(t => (
                       <button
                         key={t.id}
                         onClick={() => setTheme(t.id)}
+                        title={t.id}
                         style={{
                           width: 32, height: 32, borderRadius: '50%', background: t.color,
-                          border: theme === t.id ? '2px solid white' : '2px solid transparent',
-                          cursor: 'pointer', outlineOffset: 2, outline: theme === t.id ? `2px solid ${t.color}` : 'none'
+                          border: theme === t.id ? '3px solid white' : '2px solid transparent',
+                          cursor: 'pointer', outlineOffset: 3,
+                          outline: theme === t.id ? `2px solid ${t.color}` : 'none',
+                          transition: 'transform 0.15s',
+                          transform: theme === t.id ? 'scale(1.15)' : 'scale(1)'
                         }}
-                        title={t.id}
                       />
+                    ))}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 8 }}>Click Save Changes to apply permanently.</div>
+                </div>
+
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: 8 }}>Display Mode</label>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    {[{ id: 'dark', label: '🌙 Dark' }, { id: 'light', label: '☀️ Light' }].map(m => (
+                      <button
+                        key={m.id}
+                        onClick={() => setMode(m.id)}
+                        style={{
+                          padding: '8px 20px', borderRadius: 8, cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600,
+                          border: mode === m.id ? '2px solid var(--accent)' : '2px solid var(--border)',
+                          background: mode === m.id ? 'var(--accent)' : 'var(--bg-card)',
+                          color: mode === m.id ? 'white' : 'var(--text-secondary)',
+                          transition: 'all 0.15s'
+                        }}
+                      >{m.label}</button>
                     ))}
                   </div>
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 8 }}>Click Save Changes to apply permanently.</div>

@@ -14,32 +14,32 @@ const features: { Icon: LucideIcon; title: string; desc: string }[] = [
 
 export default function PlatformPage() {
   return (
-    <div style={{ minHeight: '100vh', background: '#09090b', color: '#fafafa', fontFamily: 'Inter, sans-serif' }}>
+    <div style={{ minHeight: '100vh', background: 'var(--bg-base)', color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif' }}>
       <Navbar activeItem="Platform" />
 
       <div style={{ maxWidth: 900, margin: '0 auto', padding: '80px 24px' }}>
         <div style={{ textAlign: 'center', marginBottom: 72 }}>
-          <div style={{ display: 'inline-block', fontSize: '0.75rem', fontWeight: 700, letterSpacing: '1.5px', color: '#ea580c', textTransform: 'uppercase', marginBottom: 16 }}>The Platform</div>
+          <div style={{ display: 'inline-block', fontSize: '0.75rem', fontWeight: 700, letterSpacing: '1.5px', color: 'var(--accent)', textTransform: 'uppercase', marginBottom: 16 }}>The Platform</div>
           <h1 style={{ fontSize: 'clamp(2.2rem, 5vw, 3.5rem)', fontWeight: 800, lineHeight: 1.1, marginBottom: 20, letterSpacing: '-0.03em' }}>
             Autonomous Security,<br />Built for Modern DevOps
           </h1>
-          <p style={{ fontSize: '1.1rem', color: '#a1a1aa', maxWidth: 600, margin: '0 auto', lineHeight: 1.7 }}>
+          <p style={{ fontSize: '1.1rem', color: 'var(--text-secondary)', maxWidth: 600, margin: '0 auto', lineHeight: 1.7 }}>
             ResilioCheck AI replaces manual code reviews with a multi-stage AI pipeline that finds, explains, and fixes vulnerabilities before they reach production.
           </p>
         </div>
 
         <div className="rc-grid-2" style={{ gap: 20 }}>
           {features.map(({ Icon, title, desc }) => (
-            <div key={title} style={{ background: '#111113', border: '1px solid #27272a', borderRadius: 12, padding: '28px 24px' }}>
-              <div style={{ marginBottom: 12, color: '#ea580c' }}><Icon size={24} /></div>
+            <div key={title} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: '28px 24px' }}>
+              <div style={{ marginBottom: 12, color: 'var(--accent)' }}><Icon size={24} /></div>
               <div style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 10 }}>{title}</div>
-              <div style={{ fontSize: '0.85rem', color: '#a1a1aa', lineHeight: 1.7 }}>{desc}</div>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.7 }}>{desc}</div>
             </div>
           ))}
         </div>
 
         <div style={{ textAlign: 'center', marginTop: 72, padding: '0 16px' }}>
-          <Link href="/register" style={{ background: '#ea580c', color: '#fff', borderRadius: 8, padding: '14px 32px', textDecoration: 'none', fontWeight: 700, fontSize: '1rem' }}>
+          <Link href="/register" style={{ background: 'var(--accent)', color: 'var(--text-primary)', borderRadius: 8, padding: '14px 32px', textDecoration: 'none', fontWeight: 700, fontSize: '1rem' }}>
             Start Scanning Free →
           </Link>
         </div>

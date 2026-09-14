@@ -106,6 +106,7 @@ export interface Settings {
   workspace: string;
   timezone: string;
   theme: string;
+  mode: string;
   plan: Plan;
   team: TeamMember[];
 }

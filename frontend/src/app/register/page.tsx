@@ -44,46 +44,46 @@ function RegisterPageInner() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: '#09090b', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+    <div style={{ minHeight: '100vh', background: 'var(--bg-base)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
       
       <div style={{ width: '100%', maxWidth: 440, position: 'relative', zIndex: 1 }}>
         <div style={{ textAlign: 'center', marginBottom: 40 }}>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-            <div style={{ width: 32, height: 32, background: '#ea580c', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1rem', color: '#ffffff' }}><Zap size={16} /></div>
-            <span style={{ fontSize: '1.3rem', fontWeight: 800, color: '#fafafa', letterSpacing: '-0.02em' }}>ResilioCheck AI</span>
+            <div style={{ width: 32, height: 32, background: 'var(--accent)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1rem', color: 'var(--text-primary)' }}><Zap size={16} /></div>
+            <span style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.02em' }}>ResilioCheck AI</span>
           </div>
-          <div style={{ fontSize: '0.85rem', color: '#71717a' }}>Create your account to get started</div>
+          <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Create your account to get started</div>
         </div>
 
-        <div style={{ background: '#111113', border: '1px solid #27272a', borderRadius: 16, padding: '36px 32px' }}>
-          <h1 style={{ fontSize: '1.4rem', fontWeight: 700, color: '#fafafa', marginBottom: 24, marginTop: 0 }}>Create account</h1>
+        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 16, padding: '36px 32px' }}>
+          <h1 style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 24, marginTop: 0 }}>Create account</h1>
           
           <form onSubmit={handleSubmit}>
             <div style={{ marginBottom: 16 }}>
-              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: '#a1a1aa', marginBottom: 8 }}>Full Name</label>
+              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8 }}>Full Name</label>
               <input type="text" value={fullName} onChange={e => setFullName(e.target.value)} placeholder="Sharon Grace Peters" required className="rc-input" />
             </div>
             
             <div style={{ marginBottom: 16 }}>
-              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: '#a1a1aa', marginBottom: 8 }}>Email Address</label>
+              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8 }}>Email Address</label>
               <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@company.com" required className="rc-input" />
             </div>
             
             <div style={{ marginBottom: 16 }}>
-              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: '#a1a1aa', marginBottom: 8 }}>Password</label>
+              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8 }}>Password</label>
               <div style={{ position: 'relative' }}>
                 <input type={showPassword ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)} placeholder="Min. 8 characters" required className="rc-input" style={{ paddingRight: 40 }} />
-                <button type="button" onClick={() => setShowPassword(!showPassword)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#a1a1aa', cursor: 'pointer' }}>
+                <button type="button" onClick={() => setShowPassword(!showPassword)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}>
                   {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
             </div>
             
             <div style={{ marginBottom: 24 }}>
-              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: '#a1a1aa', marginBottom: 8 }}>Confirm Password</label>
+              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8 }}>Confirm Password</label>
               <div style={{ position: 'relative' }}>
                 <input type={showConfirm ? "text" : "password"} value={confirm} onChange={e => setConfirm(e.target.value)} placeholder="••••••••" required className="rc-input" style={{ paddingRight: 40 }} />
-                <button type="button" onClick={() => setShowConfirm(!showConfirm)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#a1a1aa', cursor: 'pointer' }}>
+                <button type="button" onClick={() => setShowConfirm(!showConfirm)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}>
                   {showConfirm ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
@@ -100,14 +100,14 @@ function RegisterPageInner() {
             </button>
           </form>
 
-          <div style={{ marginTop: 24, textAlign: 'center', fontSize: '0.82rem', color: '#71717a' }}>
+          <div style={{ marginTop: 24, textAlign: 'center', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
             Already have an account?{' '}
-            <Link href="/login" style={{ color: '#ea580c', textDecoration: 'none', fontWeight: 600 }}>Sign in →</Link>
+            <Link href="/login" style={{ color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}>Sign in →</Link>
           </div>
         </div>
 
-        <div style={{ textAlign: 'center', marginTop: 24, fontSize: '0.75rem', color: '#52525b' }}>
-          <Link href="/" style={{ color: '#52525b', textDecoration: 'none' }}>← Back to ResilioCheck AI</Link>
+        <div style={{ textAlign: 'center', marginTop: 24, fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+          <Link href="/" style={{ color: 'var(--text-muted)', textDecoration: 'none' }}>← Back to ResilioCheck AI</Link>
         </div>
       </div>
     </div>
@@ -116,7 +116,7 @@ function RegisterPageInner() {
 
 export default function RegisterPage() {
   return (
-    <Suspense fallback={<div style={{ minHeight: '100vh', background: '#09090b' }} />}>
+    <Suspense fallback={<div style={{ minHeight: '100vh', background: 'var(--bg-base)' }} />}>
       <RegisterPageInner />
     </Suspense>
   );

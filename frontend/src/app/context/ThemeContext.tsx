@@ -5,33 +5,36 @@ import { apiJson } from '../utils/apiClient';
 
 interface ThemeContextType {
   theme: string;
+  mode: string;
   setTheme: (theme: string) => void;
-  isLoading: boolean;
+  setMode: (mode: string) => void;
 }
 
 const ThemeContext = createContext<ThemeContextType>({
   theme: 'orange',
+  mode: 'dark',
   setTheme: () => {},
-  isLoading: true,
+  setMode: () => {},
 });
 
 export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
   const [theme, setThemeState] = useState('orange');
-  const [isLoading, setIsLoading] = useState(true);
+  const [mode, setModeState] = useState('dark');
 
   useEffect(() => {
-    // Fetch initial theme from settings API
     const fetchTheme = async () => {
       try {
         const data = await apiJson('/api/settings');
-        if (data.theme) {
-          setThemeState(data.theme);
-          document.documentElement.setAttribute('data-theme', data.theme);
-        }
-      } catch (err) {
-        console.error('Failed to fetch theme settings', err);
-      } finally {
-        setIsLoading(false);
+        const t = data.theme || 'orange';
+        const m = data.mode || 'dark';
+        setThemeState(t);
+        setModeState(m);
+        document.documentElement.setAttribute('data-theme', t);
+        document.documentElement.setAttribute('data-mode', m);
+      } catch {
+        // Not logged in yet — apply defaults silently
+        document.documentElement.setAttribute('data-theme', 'orange');
+        document.documentElement.setAttribute('data-mode', 'dark');
       }
     };
     fetchTheme();
@@ -42,8 +45,13 @@ export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
     document.documentElement.setAttribute('data-theme', newTheme);
   };
 
+  const setMode = (newMode: string) => {
+    setModeState(newMode);
+    document.documentElement.setAttribute('data-mode', newMode);
+  };
+
   return (
-    <ThemeContext.Provider value={{ theme, setTheme, isLoading }}>
+    <ThemeContext.Provider value={{ theme, mode, setTheme, setMode }}>
       {children}
     </ThemeContext.Provider>
   );

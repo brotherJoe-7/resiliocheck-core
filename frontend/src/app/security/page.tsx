@@ -13,27 +13,27 @@ const sections = [
 
 export default function SecurityPage() {
   return (
-    <div style={{ minHeight: '100vh', background: '#09090b', color: '#fafafa', fontFamily: 'Inter, sans-serif' }}>
+    <div style={{ minHeight: '100vh', background: 'var(--bg-base)', color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif' }}>
       <Navbar />
       <div style={{ maxWidth: 760, margin: '0 auto', padding: '64px 24px 80px' }}>
-        <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#52525b', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 12 }}>Security</div>
+        <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 12 }}>Security</div>
         <h1 style={{ fontSize: '2.2rem', fontWeight: 800, marginBottom: 8 }}>Security Disclosure</h1>
-        <p style={{ color: '#52525b', marginBottom: 56, fontSize: '0.85rem' }}>Last updated: August 27, 2026</p>
+        <p style={{ color: 'var(--text-muted)', marginBottom: 56, fontSize: '0.85rem' }}>Last updated: August 27, 2026</p>
         {sections.map(([heading, body]) => (
           <section key={heading} style={{ marginBottom: 40 }}>
             <h2 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 12, color: '#e4e4e7' }}>
-              <span style={{ color: '#ea580c', marginRight: 8 }}><Check size={16} /></span>{heading}
+              <span style={{ color: 'var(--accent)', marginRight: 8 }}><Check size={16} /></span>{heading}
             </h2>
-            <p style={{ fontSize: '0.9rem', color: '#a1a1aa', lineHeight: 1.9, marginTop: 0 }}>{body}</p>
+            <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: 1.9, marginTop: 0 }}>{body}</p>
           </section>
         ))}
-        <div style={{ background: '#111113', border: '1px solid #27272a', borderRadius: 10, padding: '24px', marginBottom: 40 }}>
+        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: '24px', marginBottom: 40 }}>
           <div style={{ fontWeight: 700, marginBottom: 8 }}><Lock size={20} /> Report a Vulnerability</div>
-          <p style={{ fontSize: '0.85rem', color: '#a1a1aa', marginTop: 0, marginBottom: 12 }}>Send your report to <strong style={{ color: '#ea580c' }}>security@resiliocheck.ai</strong> with the subject line &quot;Responsible Disclosure&quot;.</p>
-          <div style={{ fontSize: '0.8rem', color: '#52525b' }}>We do not pursue legal action against researchers who follow this policy in good faith.</div>
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: 0, marginBottom: 12 }}>Send your report to <strong style={{ color: 'var(--accent)' }}>security@resiliocheck.ai</strong> with the subject line &quot;Responsible Disclosure&quot;.</p>
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>We do not pursue legal action against researchers who follow this policy in good faith.</div>
         </div>
-        <div style={{ marginTop: 48, paddingTop: 24, borderTop: '1px solid #27272a' }}>
-          <Link href="/" style={{ color: '#ea580c', textDecoration: 'none', fontSize: '0.85rem' }}>← Back to Home</Link>
+        <div style={{ marginTop: 48, paddingTop: 24, borderTop: '1px solid var(--border)' }}>
+          <Link href="/" style={{ color: 'var(--accent)', textDecoration: 'none', fontSize: '0.85rem' }}>← Back to Home</Link>
         </div>
       </div>
     </div>
