@@ -345,69 +345,53 @@ def run_local_sast_prefilter(workspace_dir: str) -> set:
     This acts as a high-precision filter so we only send relevant files to the LLM.
     """
     flagged_files = set()
-    if not docker_available():
-        print(f"Local SAST prefilter skipped — Docker sandbox unavailable ({_docker_state['reason']}).")
+    if not settings.SANDBOX_ENABLED:
+        print("Local SAST prefilter skipped — Sandbox disabled via SANDBOX_ENABLED=false.")
         return flagged_files
     print("Running local SAST prefilter on entire workspace...")
 
+    abs_workspace = os.path.abspath(workspace_dir)
+
     try:
-        client = docker.from_env()
-        abs_workspace = os.path.abspath(workspace_dir)
-        image = settings.SANDBOX_IMAGE
+        # Run bandit
+        if _tool_exists("bandit") and _detect_project_type(abs_workspace) == "python":
+            r_bandit = subprocess.run(
+                ["bandit", "-r", abs_workspace, "-f", "json", "-ll", "-q",
+                 "--exclude", os.path.join(abs_workspace, "node_modules")],
+                capture_output=True, text=True, timeout=60
+            )
+            try:
+                if r_bandit.stdout.strip():
+                    data = json.loads(r_bandit.stdout)
+                    for r in data.get("results", []):
+                        filename = r.get("filename", "")
+                        if filename.startswith(abs_workspace):
+                            flagged_files.add(os.path.relpath(filename, abs_workspace).replace("\\", "/"))
+            except Exception as e:
+                print(f"Error parsing bandit prefilter: {e}")
 
-        command = [
-            "sh", "-c",
-            "bandit -r /workspace -f json -ll -q --exclude /workspace/node_modules 2>/dev/null > /tmp/bandit.json; "
-            "semgrep --config=p/default /workspace --json --quiet 2>/dev/null > /tmp/semgrep.json; "
-            "cat /tmp/bandit.json; echo '---SEMGREP_START---'; cat /tmp/semgrep.json"
-        ]
-
-        logs_bytes = client.containers.run(
-            image,
-            command=command,
-            volumes={abs_workspace: {"bind": "/workspace", "mode": "ro"}},
-            network_disabled=True,
-            read_only=True,
-            cap_drop=["ALL"],
-            security_opt=["no-new-privileges:true"],
-            mem_limit="1024m",
-            detach=False,
-            remove=True,
-            tmpfs={'/tmp': '', '/run': ''}
-        )
-
-        logs = logs_bytes.decode("utf-8", errors="replace")
-        
-        # Parse bandit
-        try:
-            bandit_json = logs.split("---SEMGREP_START---")[0]
-            if bandit_json.strip() and bandit_json.strip().startswith("{"):
-                data = json.loads(bandit_json)
-                for r in data.get("results", []):
-                    filename = r.get("filename", "")
-                    if filename.startswith("/workspace/"):
-                        flagged_files.add(filename.replace("/workspace/", ""))
-        except Exception as e:
-            print(f"Error parsing bandit prefilter: {e}")
-
-        # Parse semgrep
-        try:
-            if "---SEMGREP_START---" in logs:
-                semgrep_json = logs.split("---SEMGREP_START---")[1]
-                if semgrep_json.strip() and semgrep_json.strip().startswith("{"):
-                    data = json.loads(semgrep_json)
+        # Run semgrep
+        if _tool_exists("semgrep"):
+            r_semgrep = subprocess.run(
+                ["semgrep", "--config=p/default", abs_workspace, "--json", "--quiet"],
+                capture_output=True, text=True, timeout=60
+            )
+            try:
+                if r_semgrep.stdout.strip():
+                    data = json.loads(r_semgrep.stdout)
                     for r in data.get("results", []):
                         path = r.get("path", "")
-                        if path.startswith("/workspace/"):
-                            flagged_files.add(path.replace("/workspace/", ""))
-        except Exception as e:
-            print(f"Error parsing semgrep prefilter: {e}")
+                        if path.startswith(abs_workspace):
+                            flagged_files.add(os.path.relpath(path, abs_workspace).replace("\\", "/"))
+            except Exception as e:
+                print(f"Error parsing semgrep prefilter: {e}")
 
     except Exception as e:
         print(f"Local SAST prefilter failed: {e}")
         
     print(f"Local SAST prefilter flagged {len(flagged_files)} files.")
     return flagged_files
+
 
 
 def _extract_mock_env(workspace_dir: str) -> dict:
@@ -649,9 +633,6 @@ def apply_patch_and_validate(workspace_dir, patched_code, patched_filename="patc
 
 
 # --- Removed Docker-specific container cleanup block (no longer applicable) ---
-                pass
-
-
 if __name__ == "__main__":
     # Simple CLI entry point: python -m backend.core
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
