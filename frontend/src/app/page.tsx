@@ -45,8 +45,8 @@ export default function LandingPage() {
             <div style={{ background: '#09090b', border: '1px solid #27272a', borderRadius: 12, padding: 32, position: 'relative' }}>
               <div style={{ position: 'absolute', top: -16, left: 32, background: '#ea580c', color: 'white', width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '1.2rem' }}>1</div>
               <Code size={32} color="#14b8a6" style={{ marginBottom: 20, marginTop: 10 }} />
-              <h3 style={{ fontSize: '1.3rem', color: '#fafafa', marginBottom: 12 }}>Connect Your Repo</h3>
-              <p style={{ color: '#a1a1aa', fontSize: '0.95rem', lineHeight: 1.6 }}>Link your GitHub repositories. Our system installs webhook listeners to monitor pull requests and commits in real-time.</p>
+              <h3 style={{ fontSize: '1.3rem', color: '#fafafa', marginBottom: 12 }}>Connect Public & Private Repos</h3>
+              <p style={{ color: '#a1a1aa', fontSize: '0.95rem', lineHeight: 1.6 }}>Link your GitHub account via secure OAuth. Our system installs webhook listeners to monitor both public and private repositories in real-time.</p>
             </div>
             
             <div style={{ background: '#09090b', border: '1px solid #27272a', borderRadius: 12, padding: 32, position: 'relative' }}>
@@ -77,8 +77,10 @@ export default function LandingPage() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 24 }}>
             {[
               { icon: Shield, color: '#3b82f6', title: 'Hardened Security Gates', desc: 'Enforce strict deployment policies. Block PRs automatically if Critical or High severity vulnerabilities are detected.' },
+              { icon: Lock, color: '#f59e0b', title: 'Private Repo Support', desc: 'Securely connect your GitHub account via OAuth to scan both public and private repositories with zero code exposure.' },
               { icon: Server, color: '#ec4899', title: 'On-Premise & Cloud Run', desc: 'Deploy the FastAPI backend on Google Cloud Run or in your own VPC to ensure zero unauthorized data leakage.' },
               { icon: Check, color: '#10b981', title: 'Secret Scanning', desc: 'Deterministic pre-scanning catches leaked AWS keys, JWT secrets, and database URIs before they reach production.' }
+
             ].map(f => (
               <div key={f.title} style={{ padding: 24, border: '1px solid #27272a', borderRadius: 12, background: '#111113', display: 'flex', gap: 16 }}>
                 <div style={{ width: 48, height: 48, borderRadius: 12, background: 'rgba(255,255,255,0.03)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
