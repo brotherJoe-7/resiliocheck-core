@@ -34,6 +34,7 @@ from backend.langchain_pipeline import (
 from backend.database import engine, get_db
 from backend import models, auth, admin
 from backend.auth import get_current_user
+from backend import webhook
 
 logging.basicConfig(
     level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO),
@@ -62,6 +63,7 @@ def _ensure_columns() -> None:
             "scan_count":    "INTEGER DEFAULT 0",
             "github_token":  "VARCHAR",
         },
+        "monitored_repos": {},   # created by create_all; listed here so we can add future cols
     }
     try:
         insp = sa_inspect(engine)
@@ -96,6 +98,7 @@ app = FastAPI(title="ResilioCheck AI Backend", version="2.0.0", lifespan=lifespa
 
 app.include_router(auth.router)
 app.include_router(admin.router)
+app.include_router(webhook.router)
 
 _raw_origins = settings.FRONTEND_URL
 _allowed_origins = [o.strip().rstrip("/") for o in _raw_origins.split(",") if o.strip()]
@@ -879,3 +882,92 @@ def update_settings(s: SettingsUpdate, current_user: models.User = Depends(get_c
     return {"status": "success"}
 
 
+# ── Continuous Monitoring — Monitored Repos ───────────────────────────────────
+
+class MonitoredRepoCreate(BaseModel):
+    repo_url: str = Field(..., min_length=10, max_length=300)
+    branch:   str = Field("main", max_length=120)
+
+    @field_validator('repo_url')
+    @classmethod
+    def validate_url(cls, v: str) -> str:
+        from backend.core import validate_repo_url
+        try:
+            return validate_repo_url(v)
+        except ValueError as e:
+            raise ValueError(str(e))
+
+    @field_validator('branch')
+    @classmethod
+    def validate_branch_field(cls, v: str) -> str:
+        v = v.strip()
+        if not _BRANCH_RE.match(v):
+            raise ValueError("Branch name contains invalid characters.")
+        return v
+
+
+def _monitored_to_dict(m: models.MonitoredRepo) -> dict:
+    return {
+        "id":           m.id,
+        "repo_url":     m.repo_url,
+        "branch":       m.branch,
+        "created_at":   m.created_at.isoformat() if m.created_at else None,
+        "last_scan_at": m.last_scan_at.isoformat() if m.last_scan_at else None,
+        "last_gate":    m.last_gate or "UNKNOWN",
+    }
+
+
+@app.get("/api/monitored-repos")
+def list_monitored_repos(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Return repos monitored by the current user."""
+    repos = db.query(models.MonitoredRepo).filter(
+        models.MonitoredRepo.user_id == current_user.id
+    ).order_by(models.MonitoredRepo.id.desc()).all()
+    return [_monitored_to_dict(r) for r in repos]
+
+
+@app.post("/api/monitored-repos")
+def add_monitored_repo(
+    req: MonitoredRepoCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Register a repo for continuous CI monitoring."""
+    existing = db.query(models.MonitoredRepo).filter(
+        models.MonitoredRepo.repo_url == req.repo_url
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="This repository is already being monitored.")
+
+    repo = models.MonitoredRepo(
+        user_id  = current_user.id,
+        repo_url = req.repo_url,
+        branch   = req.branch,
+    )
+    db.add(repo)
+    db.commit()
+    db.refresh(repo)
+    log.info("Monitored repo added: %s (branch=%s) by user %s", req.repo_url, req.branch, current_user.email)
+    return {"status": "success", "repo": _monitored_to_dict(repo)}
+
+
+@app.delete("/api/monitored-repos/{repo_id}")
+def remove_monitored_repo(
+    repo_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Stop monitoring a repo."""
+    repo = db.query(models.MonitoredRepo).filter(
+        models.MonitoredRepo.id == repo_id
+    ).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Monitored repo not found.")
+    if repo.user_id != current_user.id and current_user.role not in ("admin", "superadmin"):
+        raise HTTPException(status_code=403, detail="You do not have permission to remove this monitored repo.")
+    db.delete(repo)
+    db.commit()
+    return {"status": "success"}

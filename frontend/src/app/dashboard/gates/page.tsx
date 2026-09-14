@@ -1,15 +1,27 @@
 'use client';
-import { apiJson } from '@/app/utils/apiClient';
+import { apiJson, getApiBaseUrl } from '@/app/utils/apiClient';
 import type { Gate, ScanResult } from '@/app/types';
 import { useState, useEffect } from 'react';
 import Sidebar from '../../components/Sidebar';
-import { Circle } from 'lucide-react';
+import { Circle, GitBranch, Trash2, Plus, ExternalLink } from 'lucide-react';
 
+interface MonitoredRepo {
+  id: number;
+  repo_url: string;
+  branch: string;
+  last_scan_at: string | null;
+  last_gate: 'APPROVED' | 'BLOCKED' | 'UNKNOWN';
+}
 
 export default function GatesPage() {
-  const [gates, setGates]   = useState<Gate[]>([]);
+  const [gates, setGates]     = useState<Gate[]>([]);
   const [loading, setLoading] = useState(true);
   const [scanStats, setScanStats] = useState({ total: 0, blocked: 0 });
+  const [monitored, setMonitored] = useState<MonitoredRepo[]>([]);
+  const [newMonitorUrl, setNewMonitorUrl] = useState('');
+  const [newMonitorBranch, setNewMonitorBranch] = useState('main');
+  const [monitorError, setMonitorError] = useState('');
+  const [monitorLoading, setMonitorLoading] = useState(false);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newGate, setNewGate] = useState({ name: '', desc: '', strictness: 'Standard', action: 'Alert Only' });
@@ -29,6 +41,11 @@ export default function GatesPage() {
         const blocked = scans.filter(s => s.gate === 'BLOCKED').length;
         setScanStats({ total: scans.length, blocked });
       })
+      .catch(() => {});
+
+    // Load monitored repos
+    apiJson<MonitoredRepo[]>('/api/monitored-repos')
+      .then(data => setMonitored(Array.isArray(data) ? data : []))
       .catch(() => {});
   }, []);
 
@@ -63,10 +80,42 @@ export default function GatesPage() {
     }
   }
 
+  async function handleAddMonitor(e: React.FormEvent) {
+    e.preventDefault();
+    setMonitorError('');
+    setMonitorLoading(true);
+    try {
+      const data = await apiJson<{ status: string; repo: MonitoredRepo }>('/api/monitored-repos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repo_url: newMonitorUrl, branch: newMonitorBranch }),
+      });
+      if (data.status === 'success') {
+        setMonitored(m => [data.repo, ...m]);
+        setNewMonitorUrl('');
+        setNewMonitorBranch('main');
+      }
+    } catch (err) {
+      setMonitorError(err instanceof Error ? err.message : 'Failed to add repository.');
+    } finally {
+      setMonitorLoading(false);
+    }
+  }
+
+  async function handleRemoveMonitor(id: number) {
+    await apiJson(`/api/monitored-repos/${id}`, { method: 'DELETE' }).catch(console.error);
+    setMonitored(m => m.filter(r => r.id !== id));
+  }
+
   const activeCount   = gates.filter(g => g.active).length;
   const passRate      = scanStats.total > 0
     ? (((scanStats.total - scanStats.blocked) / scanStats.total) * 100).toFixed(1)
     : '—';
+
+  const gateColor = (g: string) =>
+    g === 'APPROVED' ? 'var(--green)' : g === 'BLOCKED' ? 'var(--red)' : 'var(--text-muted)';
+  const gateLabel = (g: string) =>
+    g === 'APPROVED' ? '✓ Approved' : g === 'BLOCKED' ? '✗ Blocked' : '— Unknown';
 
   return (
     <div>
@@ -78,6 +127,78 @@ export default function GatesPage() {
             <div className="rc-page-sub">Configure proactive blocks in your CI/CD pipeline.</div>
           </div>
           <button className="rc-btn-primary" onClick={() => setIsModalOpen(true)}>Create Custom Gate</button>
+        </div>
+
+        {/* ── Continuous Monitoring ──────────────────────────────────────── */}
+        <div className="rc-card" style={{ marginBottom: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+            <GitBranch size={20} color="var(--accent)" />
+            <div style={{ fontSize: '1.1rem', fontWeight: 700 }}>Continuous Monitoring</div>
+            <div className="rc-pill rc-pill-green" style={{ marginLeft: 'auto' }}>{monitored.length} Repo{monitored.length !== 1 ? 's' : ''} Watching</div>
+          </div>
+
+          <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: 16, lineHeight: 1.6 }}>
+            Register repositories below. Every push will trigger an automatic scan and post a
+            <strong style={{ color: 'var(--text-secondary)' }}> commit status</strong> to GitHub —
+            blocking the merge if critical vulnerabilities are found.
+          </div>
+
+          {/* Add form */}
+          <form onSubmit={handleAddMonitor} style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
+            <input
+              value={newMonitorUrl} onChange={e => setNewMonitorUrl(e.target.value)}
+              placeholder="https://github.com/owner/repo"
+              className="rc-input" style={{ flex: 2, minWidth: 260 }}
+              required
+            />
+            <input
+              value={newMonitorBranch} onChange={e => setNewMonitorBranch(e.target.value)}
+              placeholder="Branch (e.g. main)"
+              className="rc-input" style={{ flex: 1, minWidth: 120 }}
+            />
+            <button className="rc-btn-primary" type="submit" disabled={monitorLoading} style={{ display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
+              <Plus size={16} /> Monitor Repo
+            </button>
+          </form>
+          {monitorError && <div style={{ color: 'var(--red)', fontSize: '0.8rem', marginBottom: 12 }}>{monitorError}</div>}
+
+          {/* Repo list */}
+          {monitored.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+              No repos monitored yet. Add one above to enable automatic CI gate blocking.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {monitored.map(r => (
+                <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 8 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {r.repo_url.replace('https://github.com/', '')}
+                      <a href={r.repo_url} target="_blank" rel="noreferrer" style={{ color: 'var(--text-muted)', display: 'flex' }}><ExternalLink size={12} /></a>
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                      Branch: <strong>{r.branch}</strong> &nbsp;·&nbsp;
+                      Last scanned: {r.last_scan_at ? new Date(r.last_scan_at).toLocaleString() : 'Never'}
+                    </div>
+                  </div>
+                  <div style={{ fontWeight: 700, fontSize: '0.78rem', color: gateColor(r.last_gate), whiteSpace: 'nowrap' }}>
+                    {gateLabel(r.last_gate)}
+                  </div>
+                  <button onClick={() => handleRemoveMonitor(r.id)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 4 }} title="Stop monitoring">
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Webhook setup instructions */}
+          <div style={{ marginTop: 20, padding: '12px 16px', background: 'rgba(234,88,12,0.06)', border: '1px solid rgba(234,88,12,0.2)', borderRadius: 8, fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+            <strong style={{ color: 'var(--accent)' }}>⚡ Webhook Setup</strong> — In each GitHub repo: <strong>Settings → Webhooks → Add Webhook</strong><br />
+            Payload URL: <code style={{ background: 'var(--bg-base)', padding: '1px 6px', borderRadius: 4 }}>{getApiBaseUrl()}/api/webhooks/github</code> &nbsp;·&nbsp;
+            Content type: <code style={{ background: 'var(--bg-base)', padding: '1px 6px', borderRadius: 4 }}>application/json</code> &nbsp;·&nbsp;
+            Events: <strong>Pushes</strong> + <strong>Pull requests</strong>
+          </div>
         </div>
 
         {loading ? (

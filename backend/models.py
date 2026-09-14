@@ -77,3 +77,15 @@ class AuditLog(Base):
     target      = Column(String, nullable=False)
     timestamp   = Column(DateTime(timezone=True), server_default=func.now())
 
+
+class MonitoredRepo(Base):
+    """Tracks repositories registered for continuous webhook-based CI monitoring."""
+    __tablename__ = "monitored_repos"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    user_id      = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    repo_url     = Column(String, nullable=False, unique=True)
+    branch       = Column(String, default="main")
+    created_at   = Column(DateTime(timezone=True), server_default=func.now())
+    last_scan_at = Column(DateTime(timezone=True), nullable=True)
+    last_gate    = Column(String, default="UNKNOWN")   # APPROVED | BLOCKED | UNKNOWN
