@@ -32,18 +32,44 @@ export default function DocumentationPage() {
         {/* Content */}
         <main style={{ padding: '48px 48px 80px' }}>
           <h1 style={{ fontSize: '2rem', fontWeight: 800, marginBottom: 8 }}>Documentation</h1>
-          <p style={{ color: 'var(--text-secondary)', marginBottom: 48 }}>Everything you need to integrate ResilioCheck AI into your workflow.</p>
+          <p style={{ color: 'var(--text-secondary)', marginBottom: 48 }}>Comprehensive guide to integrating and utilising ResilioCheck AI.</p>
 
-          <section id="quickstart" style={{ marginBottom: 64 }}>
+          <section id="introduction" style={{ marginBottom: 64 }}>
+            <h2 style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: 20, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>Introduction</h2>
+            <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7, marginBottom: 16 }}>
+              ResilioCheck AI is a next-generation autonomous security platform. Unlike traditional static analysis tools that rely on rigid regex rules, ResilioCheck utilizes a <strong>Multi-Agent Large Language Model (LLM) architecture</strong> to dynamically understand code context, detect complex vulnerabilities, and automatically generate pull requests to fix them before they reach production.
+            </p>
+          </section>
+
+          <section id="getting-started" style={{ marginBottom: 64 }}>
             <h2 style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: 20, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>Quick Start</h2>
             <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>Get up and running in under 5 minutes.</p>
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '20px 24px', fontFamily: 'monospace', fontSize: '0.85rem' }}>
-              <div style={{ color: 'var(--text-muted)', marginBottom: 8 }}># 1. Start the backend</div>
+              <div style={{ color: 'var(--text-muted)', marginBottom: 8 }}># 1. Start the API backend</div>
               <div style={{ color: 'var(--text-primary)', marginBottom: 16 }}>uvicorn backend.main:app --reload --port 8000</div>
-              <div style={{ color: 'var(--text-muted)', marginBottom: 8 }}># 2. Start the frontend</div>
-              <div style={{ color: 'var(--text-primary)', marginBottom: 16 }}>cd frontend && npm run dev</div>
-              <div style={{ color: 'var(--text-muted)', marginBottom: 8 }}># 3. Open the dashboard</div>
-              <div style={{ color: 'var(--accent)' }}>http://localhost:3000</div>
+              <div style={{ color: 'var(--text-muted)', marginBottom: 8 }}># 2. Start the Frontend Application</div>
+              <div style={{ color: 'var(--text-primary)' }}>cd frontend && npm run dev</div>
+            </div>
+          </section>
+
+          <section id="agents" style={{ marginBottom: 64 }}>
+            <h2 style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: 20, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>Agents & Security Gates</h2>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>The platform orchestrates a network of specialised AI agents acting as security gates:</p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 16 }}>
+              {[
+                { title: 'XSS Prevention', badge: 'Standard', desc: 'Analyzes frontend payloads for malicious script injection (e.g., untrusted innerHTML).' },
+                { title: 'SQL Injection Guard', badge: 'Block All', desc: 'Detects unsanitised database queries and ORM misuse.' },
+                { title: 'Dependency Audit', badge: 'Block Critical', desc: 'Scans package manifests for CVEs and outdated libraries.' },
+                { title: 'Secrets Detection', badge: 'Block All', desc: 'Prevents hardcoded API keys, JWT tokens, and credentials from being shipped.' },
+              ].map(a => (
+                <div key={a.title} style={{ padding: 16, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{a.title}</div>
+                    <span style={{ fontSize: '0.6rem', padding: '3px 6px', borderRadius: 4, background: 'rgba(234,88,12,0.1)', color: 'var(--accent)', fontWeight: 700 }}>{a.badge}</span>
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>{a.desc}</div>
+                </div>
+              ))}
             </div>
           </section>
 
@@ -52,17 +78,17 @@ export default function DocumentationPage() {
             {[
               { method: 'POST', path: '/api/auth/register', desc: 'Create a new user account. The first account is automatically SuperAdmin.' },
               { method: 'POST', path: '/api/auth/login', desc: 'Authenticate and receive a JWT access token.' },
-              { method: 'GET', path: '/api/auth/me', desc: 'Get the currently authenticated user\'s profile.' },
+              { method: 'GET', path: '/api/auth/github/oauth-url', desc: 'Retrieve the GitHub OAuth consent URL for connecting private repositories.' },
               { method: 'POST', path: '/api/scan', desc: 'Submit a GitHub repository URL for a full AI security scan.' },
+              { method: 'POST', path: '/api/scans/{id}/apply-patch', desc: 'Approves an AI-generated patch and automatically creates a GitHub PR.' },
               { method: 'GET', path: '/api/agents', desc: 'Fetch the live status of all autonomous agents.' },
               { method: 'POST', path: '/api/agents/{id}/toggle', desc: 'Enable or disable a specific agent.' },
-              { method: 'GET', path: '/api/gates', desc: 'Retrieve configuration and status of all security gates.' },
               { method: 'GET', path: '/api/admin/users', desc: 'SuperAdmin only: list all platform users.' },
             ].map(e => (
               <div key={e.path} style={{ display: 'flex', alignItems: 'flex-start', gap: 16, padding: '14px 0', borderBottom: '1px solid var(--border)' }}>
                 <span style={{ background: e.method === 'GET' ? 'rgba(20,184,166,0.15)' : 'rgba(var(--accent-rgb, 234,88,12),0.15)', color: e.method === 'GET' ? '#14b8a6' : 'var(--accent)', fontFamily: 'monospace', fontWeight: 700, fontSize: '0.72rem', padding: '3px 8px', borderRadius: 4, minWidth: 48, textAlign: 'center' }}>{e.method}</span>
                 <div>
-                  <div style={{ fontFamily: 'monospace', fontSize: '0.85rem', color: 'var(--text-primary)', marginBottom: 4 }}>{e.path}</div>
+                  <div style={{ fontFamily: 'monospace', fontSize: '0.85rem', color: 'var(--text-primary)', marginBottom: 4, fontWeight: 700 }}>{e.path}</div>
                   <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>{e.desc}</div>
                 </div>
               </div>
@@ -71,38 +97,29 @@ export default function DocumentationPage() {
 
           <section id="cicd" style={{ marginBottom: 64 }}>
             <h2 style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: 20, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>CI/CD Integration (GitHub Actions)</h2>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>Add this step to your <code style={{ background: 'var(--bg-card-hover)', padding: '2px 6px', borderRadius: 4 }}>.github/workflows/ci.yml</code>:</p>
-            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '20px 24px', fontFamily: 'monospace', fontSize: '0.82rem', color: 'var(--text-primary)', whiteSpace: 'pre' }}>{`- name: ResilioCheck AI Scan
+            <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>Automate your security posture by integrating ResilioCheck directly into your GitHub Actions pipeline.</p>
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '20px 24px', fontFamily: 'monospace', fontSize: '0.82rem', color: 'var(--text-primary)', whiteSpace: 'pre', overflowX: 'auto' }}>{`- name: ResilioCheck Autonomous Scan
   uses: actions/github-script@v6
   with:
     script: |
-      const res = await fetch('https://your-backend.render.com/api/scan', {
+      const payload = {
+        repo_url: context.payload.repository.html_url,
+        branch: context.ref.replace('refs/heads/', '')
+      };
+      
+      const res = await fetch('https://resiliocheck.yourdomain.com/api/scan', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repo_url: context.payload.repository.html_url })
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': \`Bearer \${process.env.RESILIO_API_KEY}\`
+        },
+        body: JSON.stringify(payload)
       });
+      
       const data = await res.json();
-      if (data.secret_findings?.length > 0) {
-        core.setFailed('Secrets detected in commit!');
+      if (data.gate === 'BLOCKED') {
+        core.setFailed(\`Security gate failed! Critical vulnerabilities found.\`);
       }`}</div>
-          </section>
-
-          <section id="agents" style={{ marginBottom: 64 }}>
-            <h2 style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: 20, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>Agents & Security Gates</h2>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>ResilioCheck AI uses LangChain agents to process your code across multiple security gates:</p>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 16 }}>
-              {[
-                { title: 'XSS Prevention', desc: 'Analyzes frontend payloads for malicious script injection (e.g., untrusted innerHTML). Strictness: Standard.' },
-                { title: 'SQL Injection Guard', desc: 'Detects unsanitised database queries and ORM misuse. Strictness: Block All.' },
-                { title: 'Dependency Audit', desc: 'Scans package manifests for CVEs and outdated libraries. Strictness: Block Critical CVEs.' },
-                { title: 'Secrets Detection', desc: 'Prevents hardcoded API keys, JWT tokens, and credentials from being shipped. Strictness: Block All.' },
-              ].map(a => (
-                <div key={a.title} style={{ padding: 16, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8 }}>
-                  <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>{a.title}</div>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>{a.desc}</div>
-                </div>
-              ))}
-            </div>
           </section>
 
           <section id="security" style={{ marginBottom: 64 }}>

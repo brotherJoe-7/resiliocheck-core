@@ -12,7 +12,7 @@ const NAV = [
   { href: '/dashboard/deployments', label: 'Deployments',    Icon: Rocket },
   { href: '/dashboard/agents',      label: 'Agents',         Icon: Monitor },
   { href: '/dashboard/settings',    label: 'Settings',       Icon: Settings },
-  { href: '/documentation',         label: 'Documentation',  Icon: BookOpen },
+  { href: '/dashboard/documentation', label: 'Documentation', Icon: BookOpen },
 ];
 
 export default function Sidebar() {
