@@ -15,6 +15,9 @@ class User(Base):
     created_at      = Column(DateTime(timezone=True), server_default=func.now())
     last_login      = Column(DateTime(timezone=True), nullable=True)
     scan_count      = Column(Integer, default=0)
+    # GitHub OAuth token — stored when user connects their GitHub account.
+    # Enables scanning of private repositories the user has access to.
+    github_token    = Column(String, nullable=True)
 
 
 class ScanResult(Base):

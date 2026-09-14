@@ -155,11 +155,14 @@ def validate_branch(branch: str | None) -> str:
     return b
 
 
-def download_and_extract_repo(repo_url, target_dir, branch: str | None = None):
+def download_and_extract_repo(repo_url, target_dir, branch: str | None = None, github_token: str | None = None):
     """
     Download the repository archive for *branch* (falls back to the default
     branch, then main/master) and extract it safely into *target_dir*.
     Returns the ref that was actually downloaded.
+
+    If *github_token* is provided it is sent as a Bearer Authorization header,
+    enabling access to private repositories the token holder has permission to read.
     """
     # ✅ SECURITY: validate + normalise the URL before any request (SSRF guard).
     repo_url = validate_repo_url(repo_url)
@@ -177,11 +180,16 @@ def download_and_extract_repo(repo_url, target_dir, branch: str | None = None):
         if r not in refs:
             refs.append(r)
 
+    # Build request headers — inject auth token when available.
+    headers: dict = {}
+    if github_token:
+        headers["Authorization"] = f"Bearer {github_token}"
+
     last_status = None
     for ref in refs:
         zip_url = f"{repo_url}/archive/{ref}.zip"
         try:
-            response = requests.get(zip_url, timeout=30, stream=True, allow_redirects=True)
+            response = requests.get(zip_url, headers=headers, timeout=30, stream=True, allow_redirects=True)
         except requests.RequestException as exc:
             print(f"Request for '{ref}' failed: {exc}")
             continue
@@ -207,11 +215,12 @@ def download_and_extract_repo(repo_url, target_dir, branch: str | None = None):
     if not downloaded:
         if last_status == 404:
             raise RuntimeError(
-                "Repository not found (HTTP 404). Check that the URL is correct and the repository is public."
+                "Repository not found (HTTP 404). Check that the URL is correct and the repository is public, "
+                "or connect your GitHub account to scan private repositories."
             )
         raise RuntimeError(
             f"Failed to download repository archive (last HTTP status: {last_status}). "
-            "Only public GitHub repositories are supported."
+            "Only public GitHub repositories (or private repos with a connected GitHub account) are supported."
         )
 
     print("Extracting files...")

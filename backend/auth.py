@@ -139,4 +139,112 @@ def get_me(current_user: User = Depends(get_current_user)):
         "scan_count": current_user.scan_count,
         "created_at": str(current_user.created_at),
         "last_login": str(current_user.last_login),
+        "github_connected": bool(current_user.github_token),
     }
+
+
+# ── GitHub OAuth ──────────────────────────────────────────────────────────────
+
+import urllib.parse
+import requests as _http
+
+@router.get("/github/login")
+def github_login(current_user: User = Depends(get_current_user)):
+    """
+    Step 1 of GitHub OAuth: redirect the authenticated user to GitHub's
+    authorization page. GitHub will redirect back to /api/auth/github/callback
+    with a short-lived `code` once the user grants permission.
+
+    We embed the user's JWT as the `state` parameter so the callback can
+    identify who is connecting (CSRF protection via opaque bearer token).
+    """
+    if not settings.GITHUB_CLIENT_ID:
+        raise HTTPException(
+            status_code=503,
+            detail="GitHub OAuth is not configured on this server. Contact your administrator.",
+        )
+    # Re-use the user's current JWT as the state token.
+    # The callback will decode it to identify the user.
+    state = create_access_token({"sub": current_user.email, "role": current_user.role})
+    params = urllib.parse.urlencode({
+        "client_id": settings.GITHUB_CLIENT_ID,
+        "scope":     "repo read:user",          # 'repo' covers private repos
+        "state":     state,
+    })
+    github_auth_url = f"https://github.com/login/oauth/authorize?{params}"
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url=github_auth_url)
+
+
+@router.get("/github/callback")
+def github_callback(
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Step 2 of GitHub OAuth: GitHub redirects here after the user authorises.
+    We exchange the `code` for an access token, store it on the user's profile,
+    then redirect the browser back to the Vercel frontend.
+    """
+    frontend = settings.FRONTEND_URL.rstrip("/")
+
+    # Handle user denial or GitHub error
+    if error or not code or not state:
+        reason = error or "missing_code"
+        log.warning("GitHub OAuth callback error: %s", reason)
+        return _redirect_to_frontend(frontend, success=False, reason=reason)
+
+    # Validate state — it must be a valid JWT identifying a real user
+    try:
+        payload = decode_token(state)
+        user = db.query(User).filter(User.email == payload.get("sub")).first()
+    except HTTPException:
+        user = None
+
+    if not user or not user.is_active:
+        return _redirect_to_frontend(frontend, success=False, reason="invalid_state")
+
+    if not settings.GITHUB_CLIENT_SECRET:
+        return _redirect_to_frontend(frontend, success=False, reason="oauth_not_configured")
+
+    # Exchange the temporary code for a permanent access token
+    try:
+        token_resp = _http.post(
+            "https://github.com/login/oauth/access_token",
+            headers={"Accept": "application/json"},
+            json={
+                "client_id":     settings.GITHUB_CLIENT_ID,
+                "client_secret": settings.GITHUB_CLIENT_SECRET,
+                "code":          code,
+            },
+            timeout=15,
+        )
+        token_resp.raise_for_status()
+        token_data = token_resp.json()
+    except Exception as exc:
+        log.error("GitHub token exchange failed: %s", exc)
+        return _redirect_to_frontend(frontend, success=False, reason="token_exchange_failed")
+
+    access_token = token_data.get("access_token")
+    if not access_token:
+        gh_error = token_data.get("error_description", token_data.get("error", "unknown"))
+        log.warning("GitHub did not return an access token: %s", gh_error)
+        return _redirect_to_frontend(frontend, success=False, reason=gh_error)
+
+    # Persist the token on the user's profile
+    user.github_token = access_token
+    db.commit()
+    log.info("GitHub OAuth token stored for user %s", user.email)
+
+    return _redirect_to_frontend(frontend, success=True)
+
+
+def _redirect_to_frontend(frontend: str, *, success: bool, reason: str = ""):
+    """Helper: redirect back to the Vercel frontend with an OAuth status flag."""
+    from fastapi.responses import RedirectResponse
+    params = {"github_oauth": "success" if success else "error"}
+    if reason:
+        params["reason"] = reason
+    return RedirectResponse(url=f"{frontend}/dashboard?{urllib.parse.urlencode(params)}")

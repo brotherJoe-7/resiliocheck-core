@@ -58,7 +58,8 @@ def _ensure_columns() -> None:
             "model":            "VARCHAR DEFAULT ''",
         },
         "users": {
-            "scan_count": "INTEGER DEFAULT 0",
+            "scan_count":    "INTEGER DEFAULT 0",
+            "github_token":  "VARCHAR",
         },
     }
     try:
@@ -353,16 +354,16 @@ def _select_files_for_ai(rel_srcs: dict, flagged_files: set, secrets: list, max_
     return selected
 
 
-def _run_scan_blocking(repo_url: str, branch: str, engine_label: str, workspace_dir: str) -> dict:
+def _run_scan_blocking(repo_url: str, branch: str, engine_label: str, workspace_dir: str, github_token: str | None = None) -> dict:
     """Everything CPU / network heavy runs here, inside a worker thread."""
-    used_ref = download_and_extract_repo(repo_url, workspace_dir, branch=branch)
+    used_ref = download_and_extract_repo(repo_url, workspace_dir, branch=branch, github_token=github_token)
     srcs = gather_source_files(workspace_dir)
     if not srcs:
         return {"empty": True}
 
     rel_srcs = _relativise(srcs, workspace_dir)
     secrets  = scan_for_secrets(srcs)
-    flagged  = run_local_sast_prefilter(workspace_dir)   # returns set() when Docker is unavailable
+    flagged  = run_local_sast_prefilter(workspace_dir)   # returns set() when sandbox tools unavailable
     selected = _select_files_for_ai(rel_srcs, flagged, secrets, settings.MAX_FILES_FOR_AI)
 
     client = GroqClient(models=settings.resolve_model_chain(engine_label))
@@ -372,21 +373,18 @@ def _run_scan_blocking(repo_url: str, branch: str, engine_label: str, workspace_
     p_code = pipe_res.get("patched_code", "")
     p_file = pipe_res.get("patched_filename", "")
     if p_code and p_file:
-        if docker_available():
-            max_retries = 1   # each retry costs an LLM call — keep within the TPM budget
-            for attempt in range(max_retries + 1):
-                verdict, logs = apply_patch_and_validate(workspace_dir, p_code, p_file)
-                if verdict != "FAIL" or attempt == max_retries:
-                    break
-                log.info("Patch failed validation (attempt %d) — asking the AI to repair it", attempt + 1)
-                try:
-                    p_code = run_patch_retry_agent(pipe_res, selected, p_code, logs, client=client)
-                    pipe_res["patched_code"] = p_code
-                except PipelineError as exc:
-                    log.warning("Patch retry skipped: %s", exc.detail)
-                    break
-        else:
-            verdict, logs = "SKIPPED", "Docker sandbox unavailable on this host."
+        max_retries = 1   # each retry costs an LLM call — keep within the TPM budget
+        for attempt in range(max_retries + 1):
+            verdict, logs = apply_patch_and_validate(workspace_dir, p_code, p_file)
+            if verdict != "FAIL" or attempt == max_retries:
+                break
+            log.info("Patch failed validation (attempt %d) — asking the AI to repair it", attempt + 1)
+            try:
+                p_code = run_patch_retry_agent(pipe_res, selected, p_code, logs, client=client)
+                pipe_res["patched_code"] = p_code
+            except PipelineError as exc:
+                log.warning("Patch retry skipped: %s", exc.detail)
+                break
 
     return {
         "empty": False,
@@ -417,7 +415,10 @@ async def run_scan(req: ScanRequest, db: Session = Depends(get_db),
         shutil.rmtree(workspace_dir, ignore_errors=True)
         os.makedirs(workspace_dir, exist_ok=True)
 
-        outcome = await run_in_threadpool(_run_scan_blocking, repo_url, branch, req.engine, workspace_dir)
+        outcome = await run_in_threadpool(
+            _run_scan_blocking, repo_url, branch, req.engine, workspace_dir,
+            current_user.github_token or None,
+        )
 
         if outcome.get("empty"):
             result = models.ScanResult(

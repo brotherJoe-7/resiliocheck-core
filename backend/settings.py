@@ -96,6 +96,11 @@ GATE_AGENT_MODE: str = _env("GATE_AGENT_MODE", "deterministic").lower()
 GITHUB_TOKEN: str = _env("GITHUB_TOKEN")
 GITHUB_WEBHOOK_SECRET: str = _env("GITHUB_WEBHOOK_SECRET")
 
+# GitHub OAuth App credentials (used for private repository scanning).
+# Register at: https://github.com/settings/developers -> OAuth Apps
+GITHUB_CLIENT_ID: str = _env("GITHUB_CLIENT_ID")
+GITHUB_CLIENT_SECRET: str = _env("GITHUB_CLIENT_SECRET")
+
 # ── Auth ────────────────────────────────────────────────────────────────────
 JWT_SECRET_KEY: str = _env("JWT_SECRET_KEY")
 ACCESS_TOKEN_EXPIRE_HOURS: int = _env_int("ACCESS_TOKEN_EXPIRE_HOURS", 24)
@@ -152,13 +157,14 @@ def resolve_model_chain(engine: str | None) -> list[str]:
 def public_config() -> dict:
     """Non-secret configuration summary for the /api/health endpoint."""
     return {
-        "environment":        ENVIRONMENT,
-        "groq_model":         GROQ_MODEL,
-        "groq_fallbacks":     GROQ_FALLBACK_MODELS,
-        "groq_key_set":       bool(GROQ_API_KEY),
-        "github_token_set":   bool(GITHUB_TOKEN),
-        "gate_agent_mode":    GATE_AGENT_MODE,
-        "llm_tpm_budget":     LLM_TPM_BUDGET,
-        "sandbox_enabled":    SANDBOX_ENABLED,
-        "max_files_for_ai":   MAX_FILES_FOR_AI,
+        "environment":              ENVIRONMENT,
+        "groq_model":               GROQ_MODEL,
+        "groq_fallbacks":           GROQ_FALLBACK_MODELS,
+        "groq_key_set":             bool(GROQ_API_KEY),
+        "github_token_set":         bool(GITHUB_TOKEN),
+        "github_oauth_configured":  bool(GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET),
+        "gate_agent_mode":          GATE_AGENT_MODE,
+        "llm_tpm_budget":           LLM_TPM_BUDGET,
+        "sandbox_enabled":          SANDBOX_ENABLED,
+        "max_files_for_ai":         MAX_FILES_FOR_AI,
     }
