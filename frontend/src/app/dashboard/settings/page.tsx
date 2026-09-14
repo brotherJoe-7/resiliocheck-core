@@ -3,10 +3,12 @@ import { apiJson } from '@/app/utils/apiClient';
 import type { Settings } from '@/app/types';
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useTheme } from '../../context/ThemeContext';
 import Sidebar from '../../components/Sidebar';
 
 export default function SettingsPage() {
   const { user } = useAuth();
+  const { theme, setTheme } = useTheme();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [workspace, setWorkspace] = useState('');
   const [timezone, setTimezone] = useState('');
@@ -41,7 +43,7 @@ export default function SettingsPage() {
       await apiJson('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workspace, timezone })
+        body: JSON.stringify({ workspace, timezone, theme })
       });
       setMessage('Settings saved successfully.');
     } catch (err) {
@@ -72,6 +74,30 @@ export default function SettingsPage() {
               <div className="rc-card">
                 <div style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 16 }}>Workspace Preferences</div>
                 
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: 8 }}>Theme Color</label>
+                  <div style={{ display: 'flex', gap: 12 }}>
+                    {[
+                      { id: 'orange', color: '#ea580c' },
+                      { id: 'blue', color: '#3b82f6' },
+                      { id: 'purple', color: '#a855f7' },
+                      { id: 'green', color: '#10b981' }
+                    ].map(t => (
+                      <button
+                        key={t.id}
+                        onClick={() => setTheme(t.id)}
+                        style={{
+                          width: 32, height: 32, borderRadius: '50%', background: t.color,
+                          border: theme === t.id ? '2px solid white' : '2px solid transparent',
+                          cursor: 'pointer', outlineOffset: 2, outline: theme === t.id ? `2px solid ${t.color}` : 'none'
+                        }}
+                        title={t.id}
+                      />
+                    ))}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 8 }}>Click Save Changes to apply permanently.</div>
+                </div>
+
                 <div style={{ marginBottom: 16 }}>
                   <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: 8 }}>Workspace Name</label>
                   <input type="text" className="rc-input" value={workspace} onChange={e => setWorkspace(e.target.value)} />

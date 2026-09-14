@@ -276,6 +276,7 @@ class ScanRequest(BaseModel):
 class SettingsUpdate(BaseModel):
     workspace: str = Field(..., min_length=1, max_length=120)
     timezone:  str = Field(..., min_length=1, max_length=120)
+    theme:     str = Field("orange", max_length=20)
 
     @field_validator('workspace', 'timezone')
     @classmethod
@@ -850,6 +851,7 @@ def get_scan_detail(scan_id: int, db: Session = Depends(get_db), current_user: m
 _settings = {
     "workspace": "ResilioCheck AI DevSecOps",
     "timezone":  "UTC (Coordinated Universal Time)",
+    "theme":     "orange",
     "plan": {
         "name":          "Pro Plan",
         "price":         5,
@@ -879,6 +881,7 @@ def get_settings(db: Session = Depends(get_db), current_user: models.User = Depe
 def update_settings(s: SettingsUpdate, current_user: models.User = Depends(get_current_user)):
     _settings["workspace"] = s.workspace
     _settings["timezone"]  = s.timezone
+    _settings["theme"]     = s.theme
     return {"status": "success"}
 
 

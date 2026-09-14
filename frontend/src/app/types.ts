@@ -105,6 +105,7 @@ export interface Plan {
 export interface Settings {
   workspace: string;
   timezone: string;
+  theme: string;
   plan: Plan;
   team: TeamMember[];
 }
