@@ -7,7 +7,7 @@ const sections = [
   { id: 'api', label: 'API Reference' },
   { id: 'cli', label: 'CLI Usage' },
   { id: 'cicd', label: 'CI/CD Integration' },
-  { id: 'agents', label: 'Agents' },
+  { id: 'agents', label: 'Agents & Gates' },
   { id: 'security', label: 'Security Model' },
 ];
 
@@ -87,9 +87,28 @@ export default function DocumentationPage() {
       }`}</div>
           </section>
 
+          <section id="agents" style={{ marginBottom: 64 }}>
+            <h2 style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: 20, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>Agents & Security Gates</h2>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>ResilioCheck AI uses LangChain agents to process your code across multiple security gates:</p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 16 }}>
+              {[
+                { title: 'XSS Prevention', desc: 'Analyzes frontend payloads for malicious script injection (e.g., untrusted innerHTML). Strictness: Standard.' },
+                { title: 'SQL Injection Guard', desc: 'Detects unsanitised database queries and ORM misuse. Strictness: Block All.' },
+                { title: 'Dependency Audit', desc: 'Scans package manifests for CVEs and outdated libraries. Strictness: Block Critical CVEs.' },
+                { title: 'Secrets Detection', desc: 'Prevents hardcoded API keys, JWT tokens, and credentials from being shipped. Strictness: Block All.' },
+              ].map(a => (
+                <div key={a.title} style={{ padding: 16, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8 }}>
+                  <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>{a.title}</div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>{a.desc}</div>
+                </div>
+              ))}
+            </div>
+          </section>
+
           <section id="security" style={{ marginBottom: 64 }}>
             <h2 style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: 20, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>Security Model</h2>
             {[
+              { title: 'Private Repository OAuth', desc: 'Securely connect your GitHub account. Access tokens are used ephemerally during the scan and are never stored permanently, ensuring zero code exposure.' },
               { title: 'SSRF Protection', desc: 'All repository URLs are validated against a strict allowlist — only https://github.com/ URLs are accepted. This prevents Server-Side Request Forgery attacks against internal infrastructure.' },
               { title: 'Archive Size Cap', desc: 'Downloaded repository archives are capped at 100 MB to prevent memory-exhaustion DoS attacks from adversarially large repositories.' },
               { title: 'Path Traversal Prevention', desc: 'Every ZIP entry is sanitised before extraction (CWE-22) — malicious paths like ../../etc/passwd are silently skipped.' },
