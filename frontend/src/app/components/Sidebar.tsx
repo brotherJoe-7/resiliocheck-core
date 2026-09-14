@@ -3,7 +3,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '../context/AuthContext';
-import { LayoutGrid, Settings, Rocket, Shield, Monitor, Crown, User, LogOut, Menu } from 'lucide-react';
+import { LayoutGrid, Settings, Rocket, Shield, Monitor, Crown, User, LogOut, Menu, BookOpen } from 'lucide-react';
 import { useState } from 'react';
 
 const NAV = [
@@ -12,6 +12,7 @@ const NAV = [
   { href: '/dashboard/deployments', label: 'Deployments',    Icon: Rocket },
   { href: '/dashboard/agents',      label: 'Agents',         Icon: Monitor },
   { href: '/dashboard/settings',    label: 'Settings',       Icon: Settings },
+  { href: '/documentation',         label: 'Documentation',  Icon: BookOpen },
 ];
 
 export default function Sidebar() {
