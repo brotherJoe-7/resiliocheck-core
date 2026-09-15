@@ -1,5 +1,5 @@
 'use client';
-import { apiJson } from '@/app/utils/apiClient';
+import { apiJson, fetchApi } from '@/app/utils/apiClient';
 import type { Settings } from '@/app/types';
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
@@ -176,10 +176,7 @@ export default function SettingsPage() {
                         onClick={async () => {
                           if (!confirm("Are you sure you want to disconnect GitHub? You will no longer be able to scan private repositories.")) return;
                           try {
-                            const res = await fetch('/api/auth/github', {
-                              method: 'DELETE',
-                              headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-                            });
+                            const res = await fetchApi('/api/auth/github', { method: 'DELETE' });
                             if (!res.ok) throw new Error("Failed to disconnect");
                             setGithubConnected(false);
                             setMessage("GitHub account disconnected.");
