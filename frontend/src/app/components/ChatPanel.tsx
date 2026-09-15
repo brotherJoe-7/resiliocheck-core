@@ -72,6 +72,7 @@ export default function ChatPanel({ isOpen, onClose, scanId }: ChatPanelProps) {
     try {
       const data = await apiJson<{ reply: string }>('/api/chat', {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           history: nextHistory,
           scan_id: scanId ?? null,

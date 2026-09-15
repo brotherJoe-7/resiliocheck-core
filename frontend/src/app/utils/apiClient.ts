@@ -30,6 +30,7 @@ export async function fetchApi(endpoint: string, options: RequestInit = {}): Pro
   const token = typeof window !== 'undefined' ? localStorage.getItem(TOKEN_KEY) : null;
 
   const headers: Record<string, string> = {
+    ...(options.body ? { 'Content-Type': 'application/json' } : {}),
     ...((options.headers as Record<string, string>) || {}),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
