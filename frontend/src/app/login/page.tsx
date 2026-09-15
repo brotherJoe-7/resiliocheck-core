@@ -122,9 +122,9 @@ function LoginPageInner() {
         </div>
       </div>
 
-      {/* ── RIGHT PANEL: Form ── */}
+      {/* ── RIGHT PANEL (visually left): Form ── */}
       <div style={{
-        width: '100%', maxWidth: 520,
+        flex: 1,
         display: 'flex', flexDirection: 'column',
         alignItems: 'center', justifyContent: 'center',
         padding: '60px 48px',
