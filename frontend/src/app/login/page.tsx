@@ -51,7 +51,7 @@ function LoginPageInner() {
         alignItems: 'center',
         justifyContent: 'center',
         padding: '60px 48px',
-        background: 'linear-gradient(135deg, #0d0d0f 0%, #141417 40%, rgba(234,88,12,0.06) 100%)',
+        background: 'linear-gradient(135deg, var(--bg-base) 0%, var(--bg-card) 40%, color-mix(in srgb, var(--accent) 8%, transparent) 100%)',
         borderLeft: '1px solid var(--border)',
         position: 'relative',
         overflow: 'hidden',
@@ -60,13 +60,13 @@ function LoginPageInner() {
         <div style={{
           position: 'absolute', top: '20%', left: '10%',
           width: 300, height: 300, borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(234,88,12,0.12) 0%, transparent 70%)',
+          background: 'radial-gradient(circle, color-mix(in srgb, var(--accent) 14%, transparent) 0%, transparent 70%)',
           pointerEvents: 'none',
         }} />
         <div style={{
           position: 'absolute', bottom: '15%', right: '5%',
           width: 200, height: 200, borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(234,88,12,0.07) 0%, transparent 70%)',
+          background: 'radial-gradient(circle, color-mix(in srgb, var(--accent) 8%, transparent) 0%, transparent 70%)',
           pointerEvents: 'none',
         }} />
 
@@ -110,7 +110,8 @@ function LoginPageInner() {
               <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <div style={{
                   width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-                  background: 'rgba(234,88,12,0.1)', border: '1px solid rgba(234,88,12,0.2)',
+                  background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
+                  border: '1px solid color-mix(in srgb, var(--accent) 25%, transparent)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
                   <Icon size={15} color="var(--accent)" />
