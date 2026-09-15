@@ -187,7 +187,16 @@ def download_and_extract_repo(repo_url, target_dir, branch: str | None = None, g
 
     last_status = None
     for ref in refs:
-        zip_url = f"{repo_url}/archive/{ref}.zip"
+        if github_token:
+            # The web UI (github.com) ignores Bearer tokens for private archives.
+            # We must use the API endpoint to authenticate correctly.
+            path = repo_url[len("https://github.com/"):]
+            zip_url = f"https://api.github.com/repos/{path}/zipball/{ref}"
+            headers["Accept"] = "application/vnd.github+json"
+            headers["X-GitHub-Api-Version"] = "2022-11-28"
+        else:
+            zip_url = f"{repo_url}/archive/{ref}.zip"
+
         try:
             response = requests.get(zip_url, headers=headers, timeout=30, stream=True, allow_redirects=True)
         except requests.RequestException as exc:
