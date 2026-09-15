@@ -143,6 +143,7 @@
     .rc-sidebar.mobile-open { transform: translateX(0); }
     .rc-main { margin-left: 0; padding: 24px 20px; }
     .rc-grid-4 { grid-template-columns: 1fr 1fr; }
+    .rc-auth-left-panel { display: none !important; }
   }
   
   /* Page header */
