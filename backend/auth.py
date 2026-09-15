@@ -315,3 +315,15 @@ def _redirect_to_frontend(frontend: str, *, success: bool, reason: str = ""):
     if reason:
         params["reason"] = reason
     return RedirectResponse(url=f"{frontend}/dashboard?{urllib.parse.urlencode(params)}")
+
+
+@router.delete("/github")
+def disconnect_github(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Revoke GitHub OAuth access for the current user."""
+    current_user.github_token = None
+    db.commit()
+    log.info("GitHub OAuth token revoked for user %s", current_user.email)
+    return {"message": "GitHub account disconnected"}

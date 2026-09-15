@@ -169,7 +169,28 @@ export default function SettingsPage() {
                     </div>
                   </div>
                   {githubConnected ? (
-                    <span style={{ fontSize: '0.75rem', color: 'var(--green)', fontWeight: 600, padding: '4px 10px', background: 'rgba(20,209,120,0.1)', borderRadius: 20 }}>Connected</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--green)', fontWeight: 600, padding: '4px 10px', background: 'rgba(20,209,120,0.1)', borderRadius: 20 }}>Connected</span>
+                      <button 
+                        className="rc-btn-secondary"
+                        onClick={async () => {
+                          if (!confirm("Are you sure you want to disconnect GitHub? You will no longer be able to scan private repositories.")) return;
+                          try {
+                            const res = await fetch('/api/auth/github', {
+                              method: 'DELETE',
+                              headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+                            });
+                            if (!res.ok) throw new Error("Failed to disconnect");
+                            setGithubConnected(false);
+                            setMessage("GitHub account disconnected.");
+                          } catch (e) {
+                            setMessage("Error disconnecting GitHub.");
+                          }
+                        }}
+                      >
+                        Disconnect
+                      </button>
+                    </div>
                   ) : (
                     <button 
                       className="rc-btn-secondary" 
