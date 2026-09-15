@@ -162,8 +162,8 @@ class GroqClient:
 
     # -- public -------------------------------------------------------------
 
-    def chat(self, system: str, user: str, *, temperature: float = 0.0,
-             max_tokens: int | None = None, json_mode: bool = False) -> str:
+    def chat(self, system: str, user: str = "", *, history: list[dict] | None = None,
+             temperature: float = 0.0, max_tokens: int | None = None, json_mode: bool = False) -> str:
         if not self.api_key:
             raise GroqAuthError(
                 "GROQ_API_KEY is not configured on the server. "
@@ -171,7 +171,14 @@ class GroqClient:
             )
 
         max_tokens = max_tokens or settings.LLM_MAX_OUTPUT_TOKENS
-        prompt_tokens = estimate_tokens(system) + estimate_tokens(user)
+        
+        # Calculate prompt tokens
+        prompt_tokens = estimate_tokens(system)
+        if history:
+            prompt_tokens += sum(estimate_tokens(str(m.get("content", ""))) for m in history)
+        else:
+            prompt_tokens += estimate_tokens(user)
+            
         if prompt_tokens + max_tokens > self.tpm_budget:
             max_tokens = max(256, self.tpm_budget - prompt_tokens - 64)
             if prompt_tokens + max_tokens > self.tpm_budget:
@@ -180,11 +187,14 @@ class GroqClient:
                     f"({prompt_tokens} prompt tokens, budget {self.tpm_budget})."
                 )
 
+        messages = [{"role": "system", "content": system}]
+        if history:
+            messages.extend(history)
+        elif user:
+            messages.append({"role": "user", "content": user})
+
         payload: dict = {
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user",   "content": user},
-            ],
+            "messages": messages,
             "temperature": temperature,
             "max_tokens":  max_tokens,
         }

@@ -736,6 +736,43 @@ def reject_patch(scan_id: int, db: Session = Depends(get_db), current_user: mode
     db.commit()
     return {"status": "success", "patch_status": "REJECTED"}
 
+# ── AI Chat Assistant ────────────────────────────────────────────────────────
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+class ChatRequest(BaseModel):
+    history: list[ChatMessage]
+    scan_id: int | None = None
+
+@app.post("/api/chat")
+def chat_endpoint(req: ChatRequest, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """Handles multi-turn AI chat, optionally with scan context."""
+    from backend.langchain_pipeline import GroqClient
+    from config.prompts import CHAT_ASSISTANT_PROMPT
+    
+    context = ""
+    if req.scan_id:
+        scan = db.query(models.ScanResult).filter(models.ScanResult.id == req.scan_id).first()
+        if scan and (current_user.role in ("admin", "superadmin") or getattr(scan, "user_id", None) == current_user.id):
+            context = f"\n\nContext - The user is currently viewing Scan #{scan.id} for {scan.repo_url} (Branch: {scan.branch}).\n"
+            context += f"Gate Verdict: {scan.gate}\nFindings: {scan.critical_count} critical, {scan.high_count} high.\n"
+            context += f"AI Explanation of scan: {scan.explanation}\n"
+    
+    system_prompt = getattr(settings, "CHAT_ASSISTANT_PROMPT", CHAT_ASSISTANT_PROMPT) + context
+    
+    # Convert Pydantic models to dicts for GroqClient
+    history_dicts = [{"role": m.role, "content": m.content} for m in req.history]
+    
+    client = GroqClient()
+    try:
+        reply = client.chat(system=system_prompt, history=history_dicts, max_tokens=1024)
+        return {"reply": reply}
+    except Exception as e:
+        log.error("Chat API error: %s", str(e))
+        raise HTTPException(status_code=502, detail=str(e))
+
 
 # ── Gates ────────────────────────────────────────────────────────────────────
 

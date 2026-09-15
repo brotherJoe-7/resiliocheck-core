@@ -38,7 +38,6 @@ export default function AgentsPage() {
             <div className="rc-page-title">Agent Command Center</div>
             <div className="rc-page-sub">Monitor and configure autonomous remediation agents.</div>
           </div>
-          <button className="rc-btn-primary" onClick={() => alert('Agent deployment marketplace is coming soon.')}>＋ Deploy New Agent</button>
         </div>
 
         {loading ? (

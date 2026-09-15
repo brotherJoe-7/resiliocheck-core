@@ -75,7 +75,7 @@ export default function DeploymentsPage() {
             <div className="rc-page-title">Deployments Pipeline</div>
             <div className="rc-page-sub">Real-time monitoring of CI/CD rollouts and security validations.</div>
           </div>
-          <button className="rc-btn-primary" onClick={() => setIsModalOpen(true)}>Connect GitHub Actions</button>
+          <button className="rc-btn-primary" onClick={() => setIsModalOpen(true)}>⚙️ Set Up Auto-Scanning</button>
         </div>
 
         {/* KPI cards */}
@@ -280,9 +280,9 @@ export default function DeploymentsPage() {
         {isModalOpen && (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
             <div className="rc-card" style={{ width: 600 }}>
-              <div style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: 8 }}>Connect GitHub Actions</div>
+              <div style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: 8 }}>Set Up Automatic Scanning</div>
               <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 20 }}>
-                Copy and paste the following snippet into <code>.github/workflows/resiliocheck.yml</code> in your repository and add <code>RESILIOCHECK_API_KEY</code> as a GitHub Secret.
+                To automatically scan your repository every time you push code, copy the snippet below and save it as <code>.github/workflows/resiliocheck.yml</code> in your repository, then add <code>RESILIOCHECK_API_KEY</code> as a GitHub Secret. A developer can do this in 2 minutes!
               </div>
               <pre style={{ background: '#1e1e1e', padding: 16, borderRadius: 8, fontSize: '0.8rem', overflowX: 'auto', marginBottom: 20, border: '1px solid var(--border)' }}>
                 <code style={{ color: '#d4d4d4' }}>{WORKFLOW_SNIPPET}</code>

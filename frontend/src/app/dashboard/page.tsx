@@ -2,7 +2,8 @@
 import { apiJson, ApiError } from '@/app/utils/apiClient';
 import { useState, useEffect, useCallback } from 'react';
 import Sidebar from '../components/Sidebar';
-import { Zap, Check, AlertTriangle, Hourglass, LayoutGrid, X, CheckCircle2 } from 'lucide-react';
+import ChatPanel from '../components/ChatPanel';
+import { Zap, Check, AlertTriangle, Hourglass, LayoutGrid, X, CheckCircle2, Sparkles } from 'lucide-react';
 
 import type { ScanResult } from '@/app/types';
 
@@ -78,6 +79,7 @@ export default function DashboardPage() {
   const [startTime]                   = useState<number>(() => Date.now());
   const [now, setNow]                 = useState<number | null>(null);
   const [githubConnected, setGithubConnected] = useState<boolean>(false);
+  const [chatOpen, setChatOpen] = useState(false);
 
   // Parse OAuth redirect params and session uptime
   useEffect(() => {
@@ -225,6 +227,21 @@ export default function DashboardPage() {
             <div className="rc-page-title">Vulnerability Assessment Pipeline</div>
             <div className="rc-page-sub">Submit a public repository to trigger the full AI-powered scan.</div>
           </div>
+          <button
+            onClick={() => setChatOpen(true)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              background: 'linear-gradient(135deg, var(--accent), hsl(from var(--accent) h calc(s + 10) calc(l - 15)))',
+              border: 'none', borderRadius: 10, padding: '9px 18px',
+              color: '#fff', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer',
+              boxShadow: '0 4px 15px rgba(0,0,0,0.25)',
+              transition: 'opacity 0.2s, transform 0.2s',
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '0.85'; (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-1px)'; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '1'; (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)'; }}
+          >
+            <Sparkles size={15} /> Ask AI
+          </button>
         </div>
 
         {/* KPI Metrics */}
@@ -562,6 +579,12 @@ export default function DashboardPage() {
           </div>
         </div>
       </main>
+
+      <ChatPanel
+        isOpen={chatOpen}
+        onClose={() => setChatOpen(false)}
+        scanId={scanResult?.id ?? null}
+      />
     </div>
   );
 }
