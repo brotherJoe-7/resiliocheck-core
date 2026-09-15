@@ -1,32 +1,60 @@
-import Link from 'next/link';
 import Navbar from '../components/Navbar';
-
-const sections = [
-  ['Information We Collect', 'We collect the email address and full name you provide at registration. We also log the GitHub repository URLs submitted for scanning to maintain audit trails. We do not collect or store the source code from your repositories — repository data is processed in memory and discarded after each scan.'],
-  ['How We Use Your Information', 'Your email is used solely for account authentication and important service announcements. Repository scan results are stored in your session and not shared with third parties. We do not sell your personal information under any circumstances.'],
-  ['Data Retention', 'Account data is retained for as long as your account is active. You may request permanent deletion of your account and all associated data at any time by contacting privacy@resiliocheck.ai.'],
-  ['Security', 'All passwords are hashed using bcrypt. All API communication is authenticated via JWT tokens with 24-hour expiry. Sensitive data in transit is protected via HTTPS/TLS.'],
-  ['Contact Us', 'For privacy-related questions or data deletion requests, contact us at privacy@resiliocheck.ai.'],
-];
+import Link from 'next/link';
 
 export default function PrivacyPage() {
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-base)', color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif' }}>
-      <Navbar />
-      <div style={{ maxWidth: 760, margin: '0 auto', padding: '64px 24px 80px' }}>
-        <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 12 }}>Legal</div>
-        <h1 style={{ fontSize: '2.2rem', fontWeight: 800, marginBottom: 8 }}>Privacy Policy</h1>
-        <p style={{ color: 'var(--text-muted)', marginBottom: 56, fontSize: '0.85rem' }}>Last updated: August 27, 2026</p>
-        {sections.map(([heading, body]) => (
-          <section key={heading} style={{ marginBottom: 40 }}>
-            <h2 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 12, color: '#e4e4e7' }}>{heading}</h2>
-            <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: 1.9, marginTop: 0 }}>{body}</p>
-          </section>
-        ))}
-        <div style={{ marginTop: 48, paddingTop: 24, borderTop: '1px solid var(--border)' }}>
-          <Link href="/" style={{ color: 'var(--accent)', textDecoration: 'none', fontSize: '0.85rem' }}>← Back to Home</Link>
-        </div>
+      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--bg-base)' }}>
+        <Navbar activeItem="" />
       </div>
+      <main style={{ maxWidth: 800, margin: '0 auto', padding: '60px 24px 100px' }}>
+        <h1 style={{ fontSize: '2.5rem', fontWeight: 800, marginBottom: 16 }}>Privacy Policy</h1>
+        <p style={{ color: 'var(--text-secondary)', marginBottom: 48, fontSize: '1.1rem' }}>
+          Last Updated: September 2026
+        </p>
+
+        <section style={{ marginBottom: 40 }}>
+          <h2 style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: 16 }}>1. Introduction</h2>
+          <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+            Welcome to ResilioCheck AI. We are committed to protecting your privacy and ensuring the security of your source code. This Privacy Policy explains how we collect, use, and safeguard your information when you use our autonomous security platform.
+          </p>
+        </section>
+
+        <section style={{ marginBottom: 40 }}>
+          <h2 style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: 16 }}>2. How We Handle Your Code (Zero-Retention)</h2>
+          <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+            ResilioCheck AI requires access to your source code to perform security analysis. We employ a strict <strong>Zero-Retention Policy</strong>:
+          </p>
+          <ul style={{ color: 'var(--text-secondary)', lineHeight: 1.7, marginTop: 12, paddingLeft: 20 }}>
+            <li style={{ marginBottom: 8 }}>Code is downloaded to an ephemeral, isolated sandbox container.</li>
+            <li style={{ marginBottom: 8 }}>Once the AI analysis and sandbox validation are complete, the container and all source files are <strong>immediately and permanently deleted</strong>.</li>
+            <li style={{ marginBottom: 8 }}>We do not train our models on your private source code.</li>
+          </ul>
+        </section>
+
+        <section style={{ marginBottom: 40 }}>
+          <h2 style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: 16 }}>3. Information We Collect</h2>
+          <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7, marginBottom: 16 }}>
+            We only collect the minimum information required to operate the service:
+          </p>
+          <ul style={{ color: 'var(--text-secondary)', lineHeight: 1.7, paddingLeft: 20 }}>
+            <li style={{ marginBottom: 8 }}><strong>Account Information:</strong> Name and email address when you register.</li>
+            <li style={{ marginBottom: 8 }}><strong>OAuth Tokens:</strong> If you connect GitHub, we receive a temporary OAuth access token. This token is used strictly to read the repositories you select and is securely encrypted at rest.</li>
+            <li style={{ marginBottom: 8 }}><strong>Scan Metadata:</strong> We store the metadata of your scans (e.g., number of vulnerabilities found, branch name, timestamp) to display in your dashboard. We do not store the underlying code.</li>
+          </ul>
+        </section>
+
+        <section style={{ marginBottom: 40 }}>
+          <h2 style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: 16 }}>4. Third-Party AI Providers</h2>
+          <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+            We utilize secure third-party Large Language Model providers (such as Groq and DeepSeek) to analyze code snippets. Our agreements with these providers strictly prohibit them from using your code snippets for model training or retention.
+          </p>
+        </section>
+        
+        <div style={{ marginTop: 60, paddingTop: 24, borderTop: '1px solid var(--border)', textAlign: 'center' }}>
+          <Link href="/" style={{ color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}>← Back to Home</Link>
+        </div>
+      </main>
     </div>
   );
 }

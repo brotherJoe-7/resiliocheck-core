@@ -1,33 +1,53 @@
-import Link from 'next/link';
 import Navbar from '../components/Navbar';
-
-const sections = [
-  ['Acceptance of Terms', 'By accessing or using ResilioCheck AI, you agree to be bound by these Terms of Service. If you do not agree, please do not use the platform.'],
-  ['Permitted Use', 'ResilioCheck AI is designed for scanning repositories you own or have explicit permission to scan. You must not use this service to scan repositories without authorization. Any such use is a violation of these terms and may violate applicable law.'],
-  ['Account Responsibility', 'You are responsible for maintaining the confidentiality of your account credentials and for all activities that occur under your account.'],
-  ['Service Availability', 'We strive for 99.9% uptime but do not guarantee uninterrupted access. Scheduled maintenance and unforeseen outages may occur.'],
-  ['Limitation of Liability', 'ResilioCheck AI is provided as-is. We are not liable for any direct, indirect, or incidental damages resulting from your use of the service, including missed vulnerabilities or false positives in scan results.'],
-  ['Termination', 'We reserve the right to suspend or terminate accounts that violate these terms or engage in abusive behaviour without notice.'],
-];
+import Link from 'next/link';
 
 export default function TermsPage() {
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-base)', color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif' }}>
-      <Navbar />
-      <div style={{ maxWidth: 760, margin: '0 auto', padding: '64px 24px 80px' }}>
-        <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 12 }}>Legal</div>
-        <h1 style={{ fontSize: '2.2rem', fontWeight: 800, marginBottom: 8 }}>Terms of Service</h1>
-        <p style={{ color: 'var(--text-muted)', marginBottom: 56, fontSize: '0.85rem' }}>Last updated: August 27, 2026</p>
-        {sections.map(([heading, body]) => (
-          <section key={heading} style={{ marginBottom: 40 }}>
-            <h2 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 12, color: '#e4e4e7' }}>{heading}</h2>
-            <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: 1.9, marginTop: 0 }}>{body}</p>
-          </section>
-        ))}
-        <div style={{ marginTop: 48, paddingTop: 24, borderTop: '1px solid var(--border)' }}>
-          <Link href="/" style={{ color: 'var(--accent)', textDecoration: 'none', fontSize: '0.85rem' }}>← Back to Home</Link>
-        </div>
+      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--bg-base)' }}>
+        <Navbar activeItem="" />
       </div>
+      <main style={{ maxWidth: 800, margin: '0 auto', padding: '60px 24px 100px' }}>
+        <h1 style={{ fontSize: '2.5rem', fontWeight: 800, marginBottom: 16 }}>Terms of Service</h1>
+        <p style={{ color: 'var(--text-secondary)', marginBottom: 48, fontSize: '1.1rem' }}>
+          Last Updated: September 2026
+        </p>
+
+        <section style={{ marginBottom: 40 }}>
+          <h2 style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: 16 }}>1. Acceptance of Terms</h2>
+          <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+            By accessing or using ResilioCheck AI, you agree to be bound by these Terms of Service. If you disagree with any part of the terms, you may not access the service.
+          </p>
+        </section>
+
+        <section style={{ marginBottom: 40 }}>
+          <h2 style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: 16 }}>2. Service Description</h2>
+          <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+            ResilioCheck AI provides an automated security analysis platform for source code using artificial intelligence. We attempt to identify security vulnerabilities, misconfigurations, and hardcoded secrets.
+          </p>
+        </section>
+
+        <section style={{ marginBottom: 40 }}>
+          <h2 style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: 16 }}>3. No Liability for Undetected Vulnerabilities</h2>
+          <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+            <strong>Our service is provided on an "as is" and "as available" basis.</strong> While we strive for high accuracy, automated security scanning and AI analysis are not perfect and cannot guarantee the discovery of all vulnerabilities. 
+          </p>
+          <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7, marginTop: 12 }}>
+            You acknowledge and agree that ResilioCheck AI shall not be held liable for any security breaches, data losses, or damages resulting from vulnerabilities that our platform failed to detect or report. Our tool should be used as a supplementary layer of security, not a replacement for comprehensive manual security audits and standard security practices.
+          </p>
+        </section>
+
+        <section style={{ marginBottom: 40 }}>
+          <h2 style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: 16 }}>4. Responsible Use</h2>
+          <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+            You agree to only scan repositories for which you have the legal right or authorization to access and analyze. Using ResilioCheck AI to scan unauthorized targets or for malicious purposes is strictly prohibited and will result in immediate account termination.
+          </p>
+        </section>
+        
+        <div style={{ marginTop: 60, paddingTop: 24, borderTop: '1px solid var(--border)', textAlign: 'center' }}>
+          <Link href="/" style={{ color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}>← Back to Home</Link>
+        </div>
+      </main>
     </div>
   );
 }

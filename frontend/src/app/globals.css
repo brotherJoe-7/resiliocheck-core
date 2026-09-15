@@ -130,6 +130,20 @@
     color: var(--text-secondary); display: flex; align-items: center; gap: 6px;
     font-size: 0.82rem; font-family: inherit;
   }
+
+  .rc-sidebar-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 49;
+    opacity: 0; pointer-events: none; transition: opacity 0.2s;
+  }
+  .rc-sidebar-overlay.open { opacity: 1; pointer-events: auto; }
+
+  @media (max-width: 768px) {
+    .rc-mobile-topbar { display: flex; }
+    .rc-sidebar { transform: translateX(-100%); transition: transform 0.2s ease-in-out; }
+    .rc-sidebar.mobile-open { transform: translateX(0); }
+    .rc-main { margin-left: 0; padding: 24px 20px; }
+    .rc-grid-4 { grid-template-columns: 1fr 1fr; }
+  }
   
   /* Page header */
   .rc-page-hdr { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 32px; }

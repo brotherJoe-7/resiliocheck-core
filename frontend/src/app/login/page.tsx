@@ -43,7 +43,7 @@ function LoginPageInner() {
     <div style={{ minHeight: '100vh', background: 'var(--bg-base)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
       {/* Background glow removed for flat design */}
       
-      <div style={{ width: '100%', maxWidth: 420, position: 'relative', zIndex: 1 }}>
+      <div style={{ width: '100%', maxWidth: 480, position: 'relative', zIndex: 1 }}>
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 40 }}>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>

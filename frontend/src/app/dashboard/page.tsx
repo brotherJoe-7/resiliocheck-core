@@ -194,9 +194,16 @@ export default function DashboardPage() {
       });
       await loadHistory();
     } catch (e) {
-      const msg = errorMessage(e, 'Scan failed');
-      setError(msg);
+      let msg = errorMessage(e, 'Scan failed');
       const status = e instanceof ApiError ? e.status : 0;
+      
+      // Friendly rate limit message
+      if (status === 429) {
+        msg = "The AI engine is currently experiencing high volume. Please try again in 1-2 minutes.";
+      }
+
+      setError(msg);
+      
       // A 4xx from validation / download means ingestion failed; anything else means the AI stage failed.
       if (status === 400 || status === 404 || status === 0) {
         setGates({ ...INITIAL_GATES, webhook_ingestion: 'FAILED' });

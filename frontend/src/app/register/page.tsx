@@ -46,7 +46,7 @@ function RegisterPageInner() {
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-base)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
       
-      <div style={{ width: '100%', maxWidth: 440, position: 'relative', zIndex: 1 }}>
+      <div style={{ width: '100%', maxWidth: 480, position: 'relative', zIndex: 1 }}>
         <div style={{ textAlign: 'center', marginBottom: 40 }}>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
             <div style={{ width: 32, height: 32, background: 'var(--accent)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1rem', color: 'var(--text-primary)' }}><Zap size={16} /></div>
@@ -94,6 +94,10 @@ function RegisterPageInner() {
                 <AlertTriangle size={16} /> {error}
               </div>
             )}
+
+            <div style={{ marginBottom: 16, fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.5, textAlign: 'center' }}>
+              By creating an account, you agree to our <Link href="/terms" style={{ color: 'var(--accent)', textDecoration: 'none' }}>Terms of Service</Link> and <Link href="/privacy" style={{ color: 'var(--accent)', textDecoration: 'none' }}>Privacy Policy</Link>.
+            </div>
 
             <button type="submit" disabled={loading} className="rc-btn-primary" style={{ width: '100%', justifyContent: 'center', fontSize: '0.95rem', padding: '12px 20px' }}>
               {loading ? <><Hourglass size={16} /> Creating account...</> : <><Sparkles size={16} /> Create Account</>}
