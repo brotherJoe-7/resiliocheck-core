@@ -41,7 +41,7 @@ function LoginPageInner() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', background: 'var(--bg-base)' }}>
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'row-reverse', background: 'var(--bg-base)' }}>
 
       {/* ── LEFT PANEL: Branding ── */}
       <div className="rc-auth-left-panel" style={{
@@ -52,7 +52,7 @@ function LoginPageInner() {
         justifyContent: 'center',
         padding: '60px 48px',
         background: 'linear-gradient(135deg, #0d0d0f 0%, #141417 40%, rgba(234,88,12,0.06) 100%)',
-        borderRight: '1px solid var(--border)',
+        borderLeft: '1px solid var(--border)',
         position: 'relative',
         overflow: 'hidden',
       }}>
