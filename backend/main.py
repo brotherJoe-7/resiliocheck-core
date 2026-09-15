@@ -609,9 +609,9 @@ def apply_patch_pr(scan_id: int, db: Session = Depends(get_db), current_user: mo
     if getattr(scan, "patch_status", "PENDING") == "APPLIED":
         raise HTTPException(status_code=400, detail="Patch already applied")
 
-    github_token = settings.GITHUB_TOKEN
+    github_token = settings.GITHUB_TOKEN or current_user.github_token
     if not github_token:
-        raise HTTPException(status_code=503, detail="GITHUB_TOKEN is not configured on the server — automated PRs are disabled.")
+        raise HTTPException(status_code=503, detail="No GitHub token available — connect your GitHub account in Settings or ask your admin to configure GITHUB_TOKEN on the server.")
 
     # Parse owner/repo from repo_url
     repo_url = scan.repo_url.rstrip("/")
@@ -628,8 +628,9 @@ def apply_patch_pr(scan_id: int, db: Session = Depends(get_db), current_user: mo
     try:
         # ── 1. Get default branch SHA ──────────────────────────────────────────
         headers = {
-            "Authorization": f"token {github_token}",
+            "Authorization": f"Bearer {github_token}",
             "Accept":        "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
         }
         ref_resp = http_requests.get(
             f"https://api.github.com/repos/{owner}/{repo}/git/ref/heads/{scan.branch}",

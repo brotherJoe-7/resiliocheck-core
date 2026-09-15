@@ -103,7 +103,7 @@ GITHUB_CLIENT_SECRET: str = _env("GITHUB_CLIENT_SECRET")
 
 # ── Auth ────────────────────────────────────────────────────────────────────
 JWT_SECRET_KEY: str = _env("JWT_SECRET_KEY")
-ACCESS_TOKEN_EXPIRE_HOURS: int = _env_int("ACCESS_TOKEN_EXPIRE_HOURS", 24)
+ACCESS_TOKEN_EXPIRE_HOURS: int = _env_int("ACCESS_TOKEN_EXPIRE_HOURS", 168)  # 7 days
 
 # ── CORS ────────────────────────────────────────────────────────────────────
 FRONTEND_URL: str = _env("FRONTEND_URL", "http://localhost:3000")
