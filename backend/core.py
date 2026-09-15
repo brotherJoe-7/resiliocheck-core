@@ -198,13 +198,11 @@ def download_and_extract_repo(repo_url, target_dir, branch: str | None = None, g
             zip_url = f"{repo_url}/archive/{ref}.zip"
 
         try:
-            # We must handle the redirect manually because the requests library 
-            # strips the Authorization header on cross-origin redirects 
-            # (api.github.com -> codeload.github.com), causing a 401 Unauthorized.
-            response = requests.get(zip_url, headers=headers, timeout=30, stream=True, allow_redirects=False)
-            if response.status_code in (301, 302, 307, 308):
-                redirect_url = response.headers["Location"]
-                response = requests.get(redirect_url, headers=headers, timeout=30, stream=True, allow_redirects=True)
+            # Let requests handle the redirect automatically. It safely strips
+            # the Authorization header when redirecting to codeload.github.com,
+            # which is REQUIRED because codeload authenticates via a query param 
+            # (token=...) and rejects requests that ALSO contain an Authorization header.
+            response = requests.get(zip_url, headers=headers, timeout=30, stream=True, allow_redirects=True)
         except requests.RequestException as exc:
             print(f"Request for '{ref}' failed: {exc}")
             continue
