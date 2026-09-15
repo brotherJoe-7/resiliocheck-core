@@ -129,6 +129,13 @@ _MODEL_GONE_HINTS = ("decommission", "not exist", "not found", "no longer suppor
                      "does not support", "unsupported", "invalid model", "deprecated")
 _TOO_LARGE_HINTS = ("too large", "reduce the length", "reduce your", "context length",
                     "maximum context", "tokens per minute", "tpm")
+_JSON_MODE_FAIL_HINTS = (
+    "response_format",
+    "failed to generate json",
+    "failed_generation",
+    "json output",
+    "json mode",
+)
 
 
 @dataclass
@@ -225,8 +232,8 @@ class GroqClient:
                     self.dead_models.add(model)
                     continue
 
-                if status == 400 and json_mode and "response_format" in lowered:
-                    log.info("[Groq] %s does not support json_mode; retrying without", model)
+                if status == 400 and json_mode and any(h in lowered for h in _JSON_MODE_FAIL_HINTS):
+                    log.info("[Groq] %s JSON mode failed (%s); retrying without json_mode", model, err_msg[:120])
                     payload.pop("response_format", None)
                     json_mode = False
                     resp = self._post(payload)
