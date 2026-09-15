@@ -125,16 +125,16 @@ export default function DashboardPage() {
     return () => { controller.cancelled = true; };
   }, [loadHistory]);
 
-  async function handleApprove(scanId: number) {
+  async function handleApprove(scanId: number, direct: boolean = false) {
     setPatchLoading(true);
     setPatchToast(null);
     try {
-      const data = await apiJson<{ pr_url?: string }>(`/api/scans/${scanId}/apply-patch`, { method: 'POST' });
-      setPatchToast({ type: 'success', msg: 'Pull Request created on GitHub.', url: data.pr_url });
+      const data = await apiJson<{ pr_url?: string }>(`/api/scans/${scanId}/apply-patch?direct=${direct}`, { method: 'POST' });
+      setPatchToast({ type: 'success', msg: direct ? 'Patch applied directly to the branch.' : 'Pull Request created on GitHub.', url: data.pr_url });
       setScanResult(prev => prev ? { ...prev, patch_status: 'APPLIED' } : prev);
       await loadHistory();
     } catch (e) {
-      setPatchToast({ type: 'error', msg: errorMessage(e, 'Failed to create PR') });
+      setPatchToast({ type: 'error', msg: errorMessage(e, direct ? 'Failed to apply patch directly' : 'Failed to create PR') });
     } finally {
       setPatchLoading(false);
     }
@@ -441,24 +441,42 @@ export default function DashboardPage() {
 
                 {/* Approve / Reject action bar */}
                 {scanResult.patch_status === 'PENDING' && (
-                  <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                     <button
                       className="rc-btn-primary"
-                      onClick={() => handleApprove(scanResult.id)}
+                      onClick={() => handleApprove(scanResult.id, false)}
                       disabled={patchLoading}
                       style={{ fontSize: '0.78rem', padding: '8px 20px' }}
                     >
                       {patchLoading ? <><Hourglass size={16} /> Creating PR...</> : <><CheckCircle2 size={16} /> Approve &amp; Create PR</>}
                     </button>
                     <button
+                      onClick={() => handleApprove(scanResult.id, true)}
+                      disabled={patchLoading}
+                      style={{
+                        background: 'transparent',
+                        border: '1px solid var(--accent)',
+                        color: 'var(--accent)',
+                        borderRadius: 6,
+                        cursor: 'pointer',
+                        fontSize: '0.78rem',
+                        padding: '8px 20px',
+                        fontWeight: 600,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      {patchLoading ? <><Hourglass size={16} /> Merging...</> : <><CheckCircle2 size={16} /> Approve &amp; Merge Directly</>}
+                    </button>
+                    <button
                       className="rc-btn-secondary"
                       onClick={() => handleReject(scanResult.id)}
                       disabled={patchLoading}
-                      style={{ fontSize: '0.78rem', padding: '8px 20px', color: 'var(--red)', borderColor: 'rgba(239,68,68,0.4)' }}
+                      style={{ fontSize: '0.78rem', padding: '8px 20px', color: 'var(--red)', borderColor: 'rgba(239,68,68,0.4)', marginLeft: 'auto' }}
                     >
                       <X size={16} className="text-red-500" /> Reject Fix
                     </button>
-                    <span style={{ fontSize: '0.73rem', color: 'var(--text-muted)' }}>Approving will open a Pull Request on GitHub with this patch.</span>
                   </div>
                 )}
 
