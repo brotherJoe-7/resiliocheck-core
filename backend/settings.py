@@ -52,22 +52,13 @@ GROQ_API_KEY: str = _env("GROQ_API_KEY")
 GROQ_URL: str = _env("GROQ_URL", "https://api.groq.com/openai/v1/chat/completions")
 DEEPSEEK_API_KEY: str = _env("DEEPSEEK_API_KEY")
 
-# Primary model.  ``openai/gpt-oss-120b`` is the strongest model available on
-# the Groq free/developer tier.  ``llama-3.3-70b-versatile`` is enterprise-only
-# on Groq as of Aug-2026 so it is kept only as a late fallback.
-GROQ_MODEL: str = _env("GROQ_MODEL", "openai/gpt-oss-120b")
+# Model 1: Fast Triage / Quick Tasks
+GROQ_MODEL_FAST: str = _env("GROQ_MODEL_FAST", "openai/gpt-oss-20b")
+# Model 2: Deep Analysis / Patching
+GROQ_MODEL_DEEP: str = _env("GROQ_MODEL_DEEP", "openai/gpt-oss-120b")
 
-# Comma-separated list of models to try (in order) if the primary model is
-# unavailable, decommissioned, or rate-limited.  Groq rate limits are enforced
-# PER MODEL, so switching model is a legitimate way to keep the scan going.
-GROQ_FALLBACK_MODELS: list[str] = [
-    m.strip()
-    for m in _env(
-        "GROQ_FALLBACK_MODELS",
-        "openai/gpt-oss-120b,qwen/qwen3.8-27b,allam-2-7b",
-    ).split(",")
-    if m.strip()
-]
+# Ultimate Fallback Model
+DEEPSEEK_MODEL: str = _env("DEEPSEEK_MODEL", "deepseek-v4.1-flash")
 
 LLM_TEMPERATURE: float = _env_float("LLM_TEMPERATURE", 0.0)
 
@@ -127,46 +118,15 @@ MAX_FILES_FOR_AI: int = _env_int("MAX_FILES_FOR_AI", 12)
 DAILY_SCAN_LIMIT_USER: int = _env_int("DAILY_SCAN_LIMIT_USER", 3)
 
 
-# ── Engine profile → model chain ────────────────────────────────────────────
-# The dashboard lets the user pick an "Analysis Engine Profile".  We map that
-# free-text label to the model we try FIRST; the remaining models in the
-# default chain are appended as fallbacks.
 
-def resolve_model_chain(engine: str | None) -> list[str]:
-    """
-    Return an ordered, de-duplicated list of Groq model IDs to try for the
-    requested engine profile.
-    """
-    import re as _re
-    label = (engine or "").lower()
-    tokens = set(_re.findall(r"[a-z0-9.]+", label))
-    preferred: list[str] = []
-
-    if "120b" in tokens:
-        preferred.append("openai/gpt-oss-120b")
-    elif "20b" in tokens or "fast" in tokens:
-        preferred.append("openai/gpt-oss-20b")
-    elif "qwen" in tokens:
-        preferred.append("qwen/qwen3.6-27b")
-    elif "llama" in tokens and "3.3" in tokens and "deep" not in tokens:
-        # Explicit Llama request (enterprise accounts).  The legacy default
-        # label "Llama 3.3 Deep Static Analysis (SAST)" intentionally maps to
-        # the default chain because that model is no longer on the free tier.
-        preferred.append("llama-3.3-70b-versatile")
-
-    chain: list[str] = []
-    for m in preferred + [GROQ_MODEL] + GROQ_FALLBACK_MODELS:
-        if m and m not in chain:
-            chain.append(m)
-    return chain
 
 
 def public_config() -> dict:
     """Non-secret configuration summary for the /api/health endpoint."""
     return {
         "environment":              ENVIRONMENT,
-        "groq_model":               GROQ_MODEL,
-        "groq_fallbacks":           GROQ_FALLBACK_MODELS,
+        "groq_model_fast":          GROQ_MODEL_FAST,
+        "groq_model_deep":          GROQ_MODEL_DEEP,
         "groq_key_set":             bool(GROQ_API_KEY),
         "github_token_set":         bool(GITHUB_TOKEN),
         "github_oauth_configured":  bool(GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET),

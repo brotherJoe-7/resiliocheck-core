@@ -146,7 +146,6 @@ class GroqClient:
     """
     api_key: str = field(default_factory=lambda: settings.GROQ_API_KEY)
     deepseek_api_key: str = field(default_factory=lambda: settings.DEEPSEEK_API_KEY)
-    models: list[str] = field(default_factory=lambda: list(DEFAULT_MODEL_CHAIN))
     max_total_wait: float = field(default_factory=lambda: float(settings.LLM_MAX_TOTAL_WAIT_SECONDS))
     request_timeout: float = field(default_factory=lambda: float(settings.LLM_REQUEST_TIMEOUT_SECONDS))
     tpm_budget: int = field(default_factory=lambda: settings.LLM_TPM_BUDGET)
@@ -159,14 +158,14 @@ class GroqClient:
 
     def _get_route(self, task_type: str) -> dict:
         routes = {
-            "triage": {"provider": "groq", "model": "openai/gpt-oss-20b"},
-            "classify": {"provider": "groq", "model": "openai/gpt-oss-20b"},
-            "deep_scan": {"provider": "groq", "model": "openai/gpt-oss-120b"},
-            "patch": {"provider": "groq", "model": "openai/gpt-oss-120b"},
-            "batch": {"provider": "deepseek", "model": "deepseek-flash"},
-            "background": {"provider": "deepseek", "model": "deepseek-flash"},
+            "triage": {"provider": "groq", "model": settings.GROQ_MODEL_FAST},
+            "classify": {"provider": "groq", "model": settings.GROQ_MODEL_FAST},
+            "deep_scan": {"provider": "groq", "model": settings.GROQ_MODEL_DEEP},
+            "patch": {"provider": "groq", "model": settings.GROQ_MODEL_DEEP},
+            "batch": {"provider": "deepseek", "model": settings.DEEPSEEK_MODEL},
+            "background": {"provider": "deepseek", "model": settings.DEEPSEEK_MODEL},
         }
-        return routes.get(task_type, {"provider": "deepseek", "model": "deepseek-flash"})
+        return routes.get(task_type, {"provider": "deepseek", "model": settings.DEEPSEEK_MODEL})
 
     def chat(self, system: str, user: str = "", *, history: list[dict] | None = None,
              temperature: float = 0.0, max_tokens: int | None = None, json_mode: bool = False,
@@ -204,13 +203,8 @@ class GroqClient:
         primary_model = route["model"]
 
         fallback_chain = []
-        if task_type in ["deep_scan", "patch"] and primary_model == "openai/gpt-oss-120b":
-            fallback_chain = [
-                {"provider": "groq", "model": "openai/gpt-oss-20b"},
-                {"provider": "deepseek", "model": "deepseek-flash"}
-            ]
-        elif primary_provider != "deepseek" or primary_model != "deepseek-flash":
-            fallback_chain = [{"provider": "deepseek", "model": "deepseek-flash"}]
+        if primary_provider == "groq":
+            fallback_chain = [{"provider": "deepseek", "model": settings.DEEPSEEK_MODEL}]
 
         attempts = [{"provider": primary_provider, "model": primary_model}] + fallback_chain
         last_error = ""

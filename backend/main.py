@@ -91,8 +91,7 @@ async def lifespan(app: FastAPI):
         seed_defaults(db)
     finally:
         db.close()
-    log.info("ResilioCheck API started — model chain: %s, sandbox: %s",
-             settings.resolve_model_chain(None), docker_status())
+    log.info("ResilioCheck API started — sandbox: %s", docker_status())
     yield
 
 
@@ -431,7 +430,7 @@ def _run_scan_blocking(repo_url: str, branch: str, engine_label: str, workspace_
     flagged  = run_local_sast_prefilter(workspace_dir)   # returns set() when sandbox tools unavailable
     selected = _select_files_for_ai(rel_srcs, flagged, secrets, settings.MAX_FILES_FOR_AI)
 
-    client = GroqClient(models=settings.resolve_model_chain(engine_label))
+    client = GroqClient()
     pipe_res = run_pipeline(selected, secrets, client=client)
 
     verdict, logs = "SKIPPED", ""
