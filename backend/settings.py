@@ -50,6 +50,7 @@ IS_PRODUCTION: bool = ENVIRONMENT in ("production", "prod")
 # ── Groq / LLM ──────────────────────────────────────────────────────────────
 GROQ_API_KEY: str = _env("GROQ_API_KEY")
 GROQ_URL: str = _env("GROQ_URL", "https://api.groq.com/openai/v1/chat/completions")
+DEEPSEEK_API_KEY: str = _env("DEEPSEEK_API_KEY")
 
 # Primary model.  ``openai/gpt-oss-120b`` is the strongest model available on
 # the Groq free/developer tier.  ``llama-3.3-70b-versatile`` is enterprise-only
@@ -119,6 +120,11 @@ SANDBOX_TIMEOUT_SECONDS: int = _env_int("SANDBOX_TIMEOUT_SECONDS", 180)
 
 # ── Scan limits ─────────────────────────────────────────────────────────────
 MAX_FILES_FOR_AI: int = _env_int("MAX_FILES_FOR_AI", 12)
+
+# Max scans per calendar day for regular users (role="user").
+# Admins and superadmins are never rate-limited.
+# Recommended: 3 (free test tier) — raise to 5 for early-access users.
+DAILY_SCAN_LIMIT_USER: int = _env_int("DAILY_SCAN_LIMIT_USER", 3)
 
 
 # ── Engine profile → model chain ────────────────────────────────────────────

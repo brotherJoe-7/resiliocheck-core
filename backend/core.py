@@ -226,6 +226,11 @@ def download_and_extract_repo(repo_url, target_dir, branch: str | None = None, g
         print(f"Ref '{ref}' not found (HTTP {response.status_code}), trying next...")
 
     if not downloaded:
+        if last_status == 401:
+            raise RuntimeError(
+                "GitHub returned HTTP 401 (Unauthorized). Your GitHub session has expired or been revoked. "
+                "Please reconnect your GitHub account in Settings to scan private repositories."
+            )
         if last_status == 404:
             raise RuntimeError(
                 "Repository not found (HTTP 404). Check that the URL is correct and the repository is public, "

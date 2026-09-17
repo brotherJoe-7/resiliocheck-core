@@ -60,8 +60,10 @@ def _ensure_columns() -> None:
             "user_id":          "INTEGER",
         },
         "users": {
-            "scan_count":    "INTEGER DEFAULT 0",
-            "github_token":  "VARCHAR",
+            "scan_count":      "INTEGER DEFAULT 0",
+            "github_token":    "VARCHAR",
+            "scans_today":     "INTEGER DEFAULT 0",
+            "last_scan_date":  "DATE",
         },
         "monitored_repos": {},   # created by create_all; listed here so we can add future cols
     }
@@ -465,6 +467,28 @@ async def run_scan(req: ScanRequest, db: Session = Depends(get_db),
     if not settings.GROQ_API_KEY:
         raise HTTPException(status_code=503, detail="GROQ_API_KEY is not configured on the server.")
 
+    # ── Daily rate-limit check (regular users only) ────────────────────────
+    if current_user.role == "user":
+        from datetime import date as _date
+        today = _date.today()
+        last = current_user.last_scan_date
+        # Reset counter if it's a new calendar day (UTC)
+        if last is None or last < today:
+            current_user.scans_today = 0
+            current_user.last_scan_date = today
+            db.commit()
+        scans_today = current_user.scans_today or 0
+        limit = settings.DAILY_SCAN_LIMIT_USER
+        if scans_today >= limit:
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    f"Daily scan limit reached ({limit} scans/day for free accounts). "
+                    "Your quota resets at midnight UTC. Upgrade your plan for unlimited scans."
+                ),
+            )
+    # ─────────────────────────────────────────────────────────────────────────
+
     try:
         repo_url = validate_repo_url(req.repo_url)
         branch   = validate_branch(req.branch)
@@ -492,6 +516,8 @@ async def run_scan(req: ScanRequest, db: Session = Depends(get_db),
             )
             db.add(result)
             current_user.scan_count = (current_user.scan_count or 0) + 1
+            current_user.scans_today = (current_user.scans_today or 0) + 1
+            current_user.last_scan_date = __import__("datetime").date.today()
             db.commit()
             db.refresh(result)
             return _scan_to_dict(result)
@@ -550,6 +576,8 @@ async def run_scan(req: ScanRequest, db: Session = Depends(get_db),
                                 f"> Gate: {pipeline_result['gate']} | Model: {pipeline_result.get('model', '')}")
 
         current_user.scan_count = (current_user.scan_count or 0) + 1
+        current_user.scans_today = (current_user.scans_today or 0) + 1
+        current_user.last_scan_date = __import__("datetime").date.today()
         db.commit()
         db.refresh(result)
         payload = _scan_to_dict(result)
@@ -563,8 +591,21 @@ async def run_scan(req: ScanRequest, db: Session = Depends(get_db),
         raise HTTPException(status_code=exc.status_code, detail=exc.detail)
     except (ValueError, RuntimeError) as exc:
         # download / validation problems — message is already user-friendly
-        log.warning("Scan failed for %s: %s", repo_url, exc)
-        raise HTTPException(status_code=400, detail=f"Scan failed: {exc}")
+        exc_str = str(exc)
+        log.warning("Scan failed for %s: %s", repo_url, exc_str)
+        # Detect a stale / revoked GitHub OAuth token (HTTP 401 from GitHub API)
+        if "401" in exc_str and current_user.github_token:
+            log.warning("GitHub token for user %s returned 401 — clearing stale token", current_user.email)
+            current_user.github_token = None
+            db.commit()
+            raise HTTPException(
+                status_code=401,
+                detail=(
+                    "Your GitHub session has expired or been revoked. "
+                    "Please go to Settings → GitHub and reconnect your account to scan private repositories."
+                ),
+            )
+        raise HTTPException(status_code=400, detail=f"Scan failed: {exc_str}")
     except HTTPException:
         raise
     except Exception as exc:
@@ -767,7 +808,7 @@ def chat_endpoint(req: ChatRequest, db: Session = Depends(get_db), current_user:
     
     client = GroqClient()
     try:
-        reply = client.chat(system=system_prompt, history=history_dicts, max_tokens=1024)
+        reply = client.chat(system=system_prompt, history=history_dicts, max_tokens=1024, task_type="classify")
         return {"reply": reply}
     except Exception as e:
         log.error("Chat API error: %s", str(e))

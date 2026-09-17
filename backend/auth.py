@@ -176,6 +176,14 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db), _:
 
 @router.get("/me")
 def get_me(current_user: User = Depends(get_current_user)):
+    from backend import settings as _s
+    from datetime import date as _date
+    # Reset today's counter if it's a new day (handle stale DB reads)
+    scans_today = current_user.scans_today or 0
+    last_date = current_user.last_scan_date
+    if last_date is None or last_date < _date.today():
+        scans_today = 0
+    limit = _s.DAILY_SCAN_LIMIT_USER if current_user.role == "user" else None
     return {
         "id": current_user.id,
         "email": current_user.email,
@@ -185,6 +193,9 @@ def get_me(current_user: User = Depends(get_current_user)):
         "created_at": str(current_user.created_at),
         "last_login": str(current_user.last_login),
         "github_connected": bool(current_user.github_token),
+        "scans_today": scans_today,
+        "daily_scan_limit": limit,        # None means unlimited (admin/superadmin)
+        "scans_remaining": max(0, limit - scans_today) if limit is not None else None,
     }
 
 

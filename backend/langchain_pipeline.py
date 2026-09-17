@@ -141,38 +141,39 @@ _JSON_MODE_FAIL_HINTS = (
 @dataclass
 class GroqClient:
     """
-    Thin, dependency-free Groq chat client with model fallback and a shared
-    wait budget across all calls made during one scan.
+    Multi-model AI client with task-based routing across Groq and DeepSeek.
+    Retains the original GroqClient name for backwards compatibility.
     """
     api_key: str = field(default_factory=lambda: settings.GROQ_API_KEY)
+    deepseek_api_key: str = field(default_factory=lambda: settings.DEEPSEEK_API_KEY)
     models: list[str] = field(default_factory=lambda: list(DEFAULT_MODEL_CHAIN))
     max_total_wait: float = field(default_factory=lambda: float(settings.LLM_MAX_TOTAL_WAIT_SECONDS))
     request_timeout: float = field(default_factory=lambda: float(settings.LLM_REQUEST_TIMEOUT_SECONDS))
     tpm_budget: int = field(default_factory=lambda: settings.LLM_TPM_BUDGET)
-    # Injectable for tests
-    # Resolved lazily so tests can monkeypatch ``requests.post`` / ``time.sleep``
     post: Callable[..., requests.Response] | None = field(default=None, repr=False)
     sleep: Callable[[float], None] | None = field(default=None, repr=False)
 
-    # runtime state
     waited: float = 0.0
-    last_model: str = ""
-    dead_models: set = field(default_factory=set)
     calls: int = 0
+    last_model: str = ""
 
-    # -- public -------------------------------------------------------------
+    def _get_route(self, task_type: str) -> dict:
+        routes = {
+            "triage": {"provider": "groq", "model": "openai/gpt-oss-20b"},
+            "classify": {"provider": "groq", "model": "openai/gpt-oss-20b"},
+            "deep_scan": {"provider": "groq", "model": "openai/gpt-oss-120b"},
+            "patch": {"provider": "groq", "model": "openai/gpt-oss-120b"},
+            "batch": {"provider": "deepseek", "model": "deepseek-flash"},
+            "background": {"provider": "deepseek", "model": "deepseek-flash"},
+        }
+        return routes.get(task_type, {"provider": "deepseek", "model": "deepseek-flash"})
 
     def chat(self, system: str, user: str = "", *, history: list[dict] | None = None,
-             temperature: float = 0.0, max_tokens: int | None = None, json_mode: bool = False) -> str:
-        if not self.api_key:
-            raise GroqAuthError(
-                "GROQ_API_KEY is not configured on the server. "
-                "Set it in the backend environment (Cloud Run → Variables) and redeploy."
-            )
-
+             temperature: float = 0.0, max_tokens: int | None = None, json_mode: bool = False,
+             task_type: str = "deep_scan") -> str:
+             
         max_tokens = max_tokens or settings.LLM_MAX_OUTPUT_TOKENS
         
-        # Calculate prompt tokens
         prompt_tokens = estimate_tokens(system)
         if history:
             prompt_tokens += sum(estimate_tokens(str(m.get("content", ""))) for m in history)
@@ -182,10 +183,7 @@ class GroqClient:
         if prompt_tokens + max_tokens > self.tpm_budget:
             max_tokens = max(256, self.tpm_budget - prompt_tokens - 64)
             if prompt_tokens + max_tokens > self.tpm_budget:
-                raise GroqPayloadTooLarge(
-                    f"Prompt is too large for the per-minute token budget "
-                    f"({prompt_tokens} prompt tokens, budget {self.tpm_budget})."
-                )
+                raise GroqPayloadTooLarge(f"Prompt is too large ({prompt_tokens} tokens, budget {self.tpm_budget}).")
 
         messages = [{"role": "system", "content": system}]
         if history:
@@ -193,32 +191,63 @@ class GroqClient:
         elif user:
             messages.append({"role": "user", "content": user})
 
-        payload: dict = {
+        payload = {
             "messages": messages,
             "temperature": temperature,
-            "max_tokens":  max_tokens,
+            "max_tokens": max_tokens,
         }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
 
-        last_error = ""
-        while True:
-            live_models = [m for m in self.models if m not in self.dead_models]
-            if not live_models:
-                raise GroqModelUnavailable(
-                    "All configured Groq models were rejected or exhausted. "
-                    f"Tried: {', '.join(self.models)}. Last error: {last_error or 'n/a'}"
-                )
+        route = self._get_route(task_type)
+        primary_provider = route["provider"]
+        primary_model = route["model"]
 
-            min_wait: float | None = None
-            for model in live_models:
+        fallback_chain = []
+        if task_type in ["deep_scan", "patch"] and primary_model == "openai/gpt-oss-120b":
+            fallback_chain = [
+                {"provider": "groq", "model": "openai/gpt-oss-20b"},
+                {"provider": "deepseek", "model": "deepseek-flash"}
+            ]
+        elif primary_provider != "deepseek" or primary_model != "deepseek-flash":
+            fallback_chain = [{"provider": "deepseek", "model": "deepseek-flash"}]
+
+        attempts = [{"provider": primary_provider, "model": primary_model}] + fallback_chain
+        last_error = ""
+        
+        # Track models we've tried and exhausted
+        dead_models = set()
+
+        while True:
+            for attempt in attempts:
+                provider = attempt["provider"]
+                model = attempt["model"]
+                
+                if model in dead_models:
+                    continue
+                
                 payload["model"] = model
-                if json_mode:
-                    payload["response_format"] = {"type": "json_object"}
-                resp = self._post(payload)
-                if resp is None:
+                ak = self.api_key if provider == "groq" else self.deepseek_api_key
+                base_url = settings.GROQ_URL.replace("/chat/completions", "") if provider == "groq" else "https://api.deepseek.com"
+                url = f"{base_url.rstrip('/')}/chat/completions"
+                
+                if not ak:
+                    last_error = f"{provider.capitalize()} API key not configured."
+                    continue
+
+                self.calls += 1
+                log.info("[%s] call #%d model=%s max_tokens=%s task=%s", provider, self.calls, model, max_tokens, task_type)
+                
+                try:
+                    resp = (self.post or requests.post)(
+                        url,
+                        headers={"Authorization": f"Bearer {ak}", "Content-Type": "application/json"},
+                        json=payload,
+                        timeout=self.request_timeout,
+                    )
+                except requests.RequestException as exc:
+                    log.warning("[%s] network error on %s: %s", provider, model, exc)
                     last_error = f"{model}: network error"
-                    min_wait = 3.0 if min_wait is None else min(min_wait, 3.0)
                     continue
 
                 if resp.ok:
@@ -227,88 +256,36 @@ class GroqClient:
 
                 status = resp.status_code
                 err_msg = self._error_message(resp)
-                lowered = err_msg.lower()
                 last_error = f"{model}: HTTP {status} — {err_msg}"
+                lowered = err_msg.lower()
 
                 if status in (401, 403):
-                    raise GroqAuthError(
-                        f"Groq rejected the API key ({status}): {err_msg}. "
-                        "Verify GROQ_API_KEY in the backend environment."
-                    )
-
-                if status == 404 or (status == 400 and "model" in lowered
-                                     and any(h in lowered for h in _MODEL_GONE_HINTS)):
-                    log.warning("[Groq] model %s unavailable (%s): %s — trying next", model, status, err_msg)
-                    self.dead_models.add(model)
+                    log.error("[%s] Auth error: %s", provider, err_msg)
                     continue
-
-                if status == 400 and json_mode and any(h in lowered for h in _JSON_MODE_FAIL_HINTS):
-                    log.info("[Groq] %s JSON mode failed (%s); retrying without json_mode", model, err_msg[:120])
-                    payload.pop("response_format", None)
-                    json_mode = False
-                    resp = self._post(payload)
-                    if resp is None:
-                        continue
-                    if resp.ok:
-                        self.last_model = model
-                        return self._extract_content(resp, model)
-                    status = resp.status_code
-                    err_msg = self._error_message(resp)
-                    lowered = err_msg.lower()
-                    last_error = f"{model}: HTTP {status} — {err_msg}"
-
-                if status == 413 or (status == 400 and any(h in lowered for h in _TOO_LARGE_HINTS)):
-                    raise GroqPayloadTooLarge(f"Groq {status}: {err_msg}")
 
                 if status == 429:
                     wait = _parse_retry_after(resp)
                     if "per day" in lowered or "tpd" in lowered or "rpd" in lowered or wait > 600:
-                        log.warning("[Groq] daily quota exhausted on %s; skipping model", model)
-                        self.dead_models.add(model)
+                        log.warning("[%s] daily quota exhausted on %s; skipping model", provider, model)
+                        dead_models.add(model)
                         continue
                     if "too large" in lowered or "tokens per minute" in lowered and "request" in lowered:
-                        # A single request bigger than the TPM cap will never succeed.
-                        raise GroqPayloadTooLarge(f"Groq 429: {err_msg}")
-                    log.warning("[Groq] %s rate-limited (retry-after≈%.1fs): %s", model, wait, err_msg)
-                    min_wait = wait if min_wait is None else min(min_wait, wait)
-                    continue  # hop to next model
-
-                if status in (498, 500, 502, 503, 504):
-                    log.warning("[Groq] %s transient %s: %s", model, status, err_msg)
-                    min_wait = 3.0 if min_wait is None else min(min_wait, 3.0)
+                        raise GroqPayloadTooLarge(f"{provider} 429: {err_msg}")
+                        
+                    log.warning("[%s] %s rate-limited (retry-after≈%.1fs): %s", provider, model, wait, err_msg)
                     continue
 
-                raise PipelineError(f"Groq API error {status} on model '{model}': {err_msg}", status_code=502)
+                if status in (500, 502, 503, 504):
+                    log.warning("[%s] %s transient %s: %s", provider, model, status, err_msg)
+                    continue
 
-            # One full pass over the chain without success -> wait, then retry.
-            if not [m for m in self.models if m not in self.dead_models]:
-                continue  # loop head raises GroqModelUnavailable
-            wait = min(min_wait if min_wait is not None else 3.0, 60.0)
-            if self.waited + wait > self.max_total_wait:
-                raise GroqRateLimitError(
-                    "Groq rate limit reached on every configured model and the wait "
-                    f"budget ({int(self.max_total_wait)}s) is exhausted. Please retry in about "
-                    f"{int(wait) or 1} second(s). Last response: {last_error}"
-                )
-            log.info("[Groq] all models rate-limited; sleeping %.1fs (total waited %.1fs)", wait, self.waited)
-            (self.sleep or time.sleep)(wait)
-            self.waited += wait
-
-    # -- helpers ------------------------------------------------------------
-
-    def _post(self, payload: dict) -> requests.Response | None:
-        self.calls += 1
-        log.info("[Groq] call #%d model=%s max_tokens=%s", self.calls, payload.get("model"), payload.get("max_tokens"))
-        try:
-            return (self.post or requests.post)(
-                settings.GROQ_URL,
-                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-                json=payload,
-                timeout=self.request_timeout,
-            )
-        except requests.RequestException as exc:
-            log.warning("[Groq] network error on %s: %s", payload.get("model"), exc)
-            return None
+                if status == 413 or (status == 400 and any(h in lowered for h in _TOO_LARGE_HINTS)):
+                    raise GroqPayloadTooLarge(f"{provider} {status}: {err_msg}")
+                    
+                log.warning("[%s] unexpected error %s on %s: %s", provider, status, model, err_msg)
+                
+            # If we fall out of the for loop, all attempts failed
+            raise GroqModelUnavailable(f"All models in fallback chain failed. Last error: {last_error}")
 
     @staticmethod
     def _error_message(resp: requests.Response) -> str:
@@ -507,7 +484,7 @@ def run_owasp_agent(client: GroqClient, source_files: dict, secret_findings: lis
             + code_ctx
         )
         try:
-            raw = client.chat(OWASP_SYSTEM_PROMPT, user_msg, temperature=settings.LLM_TEMPERATURE, json_mode=True)
+            raw = client.chat(OWASP_SYSTEM_PROMPT, user_msg, temperature=settings.LLM_TEMPERATURE, json_mode=True, task_type="triage")
             break
         except GroqPayloadTooLarge as exc:
             if attempts >= 3:
@@ -551,7 +528,7 @@ def run_gate_agent(client: GroqClient | None, owasp_result: dict) -> dict:
             "deterministic_verdict": gate,
         })
         try:
-            raw = client.chat(GATE_DECISION_SYSTEM_PROMPT, user_msg, temperature=0.0, max_tokens=200, json_mode=True)
+            raw = client.chat(GATE_DECISION_SYSTEM_PROMPT, user_msg, temperature=0.0, max_tokens=200, json_mode=True, task_type="classify")
             llm = _parse_json(raw, {})
             if str(llm.get("gate", "")).upper() == "BLOCKED" and gate != "BLOCKED":
                 result["gate"] = "BLOCKED"
@@ -618,7 +595,7 @@ def run_patch_agent(client: GroqClient, owasp_result: dict, source_files: dict) 
         f"Return the complete corrected file:"
     )
     out_tokens = min(settings.LLM_MAX_OUTPUT_TOKENS * 2, estimate_tokens(content) + 600)
-    patched = _strip_code_fences(client.chat(PATCH_SYSTEM_PROMPT, user_msg, temperature=0.1, max_tokens=out_tokens))
+    patched = _strip_code_fences(client.chat(PATCH_SYSTEM_PROMPT, user_msg, temperature=0.1, max_tokens=out_tokens, task_type="patch"))
     if not patched.strip() or patched.strip() == content.strip():
         log.info("[Pipeline] Patch Agent returned no change.")
         return "", ""
@@ -653,7 +630,7 @@ def run_patch_retry_agent(owasp_result: dict, source_files: dict, failed_patch: 
         f"Return the complete corrected file:"
     )
     out_tokens = min(settings.LLM_MAX_OUTPUT_TOKENS * 2, estimate_tokens(failed_patch) + 600)
-    patched = _strip_code_fences(client.chat(system, user_msg, temperature=0.2, max_tokens=out_tokens))
+    patched = _strip_code_fences(client.chat(system, user_msg, temperature=0.2, max_tokens=out_tokens, task_type="patch"))
     log.info("[Pipeline] Patch Retry Agent generated %d chars", len(patched))
     return patched or failed_patch
 

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, JSON, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, JSON, ForeignKey, Date
 from sqlalchemy.sql import func
 from backend.database import Base
 
@@ -14,10 +14,13 @@ class User(Base):
     is_active       = Column(Boolean, default=True)
     created_at      = Column(DateTime(timezone=True), server_default=func.now())
     last_login      = Column(DateTime(timezone=True), nullable=True)
-    scan_count      = Column(Integer, default=0)
+    scan_count      = Column(Integer, default=0)  # lifetime total
     # GitHub OAuth token — stored when user connects their GitHub account.
     # Enables scanning of private repositories the user has access to.
     github_token    = Column(String, nullable=True)
+    # Daily scan rate limiting
+    scans_today     = Column(Integer, default=0)        # resets each calendar day
+    last_scan_date  = Column(Date, nullable=True)       # date of last scan (UTC)
 
 
 class ScanResult(Base):
