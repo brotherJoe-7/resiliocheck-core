@@ -64,7 +64,7 @@ GROQ_FALLBACK_MODELS: list[str] = [
     m.strip()
     for m in _env(
         "GROQ_FALLBACK_MODELS",
-        "openai/gpt-oss-20b,qwen/qwen3.6-27b,llama-3.3-70b-versatile,llama-3.1-8b-instant,deepseek-coder",
+        "openai/gpt-oss-120b,qwen/qwen3.8-27b,allam-2-7b",
     ).split(",")
     if m.strip()
 ]

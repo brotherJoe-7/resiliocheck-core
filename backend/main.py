@@ -242,8 +242,8 @@ _SAFE_TEXT_RE = re.compile(r'[<>"\']')  # reject HTML injection chars in free-te
 _VALID_ENGINES = {
     "Groq GPT-OSS 120B Deep Static Analysis (SAST)",
     "Groq GPT-OSS 20B Fast Static Analysis (SAST)",
-    "Qwen 27B Deep Static Analysis (SAST)",
-    "Llama 3.3 Deep Static Analysis (SAST)",
+    "Qwen 3.8-27B Deep Static Analysis (SAST)",
+    "Allam 2-7B Fast Static Analysis (SAST)",
 }
 
 def _sanitize_text(value: str, max_len: int = 256) -> str:
