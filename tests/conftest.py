@@ -67,12 +67,31 @@ def client(app):
         yield c
 
 
+_TOKEN_CACHE: dict = {}
+
+
 @pytest.fixture()
 def auth_headers(client):
-    """Register (or log in) a test user and return bearer headers."""
-    creds = {"email": "tester@example.com", "password": "password123", "full_name": "Test User"}
-    r = client.post("/api/auth/register", json=creds)
-    if r.status_code == 400:  # already registered in this session
-        r = client.post("/api/auth/login", json={"email": creds["email"], "password": creds["password"]})
-    assert r.status_code == 200, r.text
-    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+    """
+    Register (or log in) a test user once per session and reuse the token.
+    The auth endpoints are brute-force rate-limited (5 calls / minute / IP),
+    so we also reset the limiter to keep tests independent of ordering.
+    """
+    from backend import auth as _auth
+    _auth.login_limiter.clients.clear()
+
+    if "token" not in _TOKEN_CACHE:
+        creds = {"email": "tester@example.com", "password": "password123", "full_name": "Test User"}
+        r = client.post("/api/auth/register", json=creds)
+        if r.status_code == 400:  # already registered in this session
+            r = client.post("/api/auth/login", json={"email": creds["email"], "password": creds["password"]})
+        assert r.status_code == 200, r.text
+        _TOKEN_CACHE["token"] = r.json()["access_token"]
+    return {"Authorization": f"Bearer {_TOKEN_CACHE['token']}"}
+
+
+@pytest.fixture(autouse=True)
+def _reset_auth_rate_limiter():
+    from backend import auth as _auth
+    _auth.login_limiter.clients.clear()
+    yield
