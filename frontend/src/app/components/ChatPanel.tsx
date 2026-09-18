@@ -90,20 +90,16 @@ function parseInlineBlocks(block: string): React.ReactNode[] {
       const items: React.ReactNode[] = [];
       while (i < lines.length && /^[-*] /.test(lines[i].trim())) {
         items.push(
-          <li key={i} style={{ marginBottom: 4, lineHeight: 1.55 }}>
-            {parseInline(lines[i].trim().slice(2))}
+          <li key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 4, lineHeight: 1.55 }}>
+            <span style={{ color: 'var(--accent)', fontSize: '0.7rem', marginTop: 5, flexShrink: 0 }}>▸</span>
+            <span>{parseInline(lines[i].trim().slice(2))}</span>
           </li>
         );
         i++;
       }
       nodes.push(
         <ul key={`ul-${i}`} style={{ margin: '6px 0', paddingLeft: 18, listStyle: 'none' }}>
-          {items.map((item, idx) => (
-            <li key={idx} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 4, lineHeight: 1.55 }}>
-              <span style={{ color: 'var(--accent)', fontSize: '0.7rem', marginTop: 5, flexShrink: 0 }}>▸</span>
-              <span>{(item as React.ReactElement).props.children}</span>
-            </li>
-          ))}
+          {items}
         </ul>
       );
       continue;
