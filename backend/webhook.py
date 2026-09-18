@@ -128,7 +128,7 @@ def _run_webhook_scan(
         flagged  = run_local_sast_prefilter(workspace_dir)
         selected = _select_files_for_ai(rel_srcs, flagged, secrets, settings.MAX_FILES_FOR_AI)
 
-        client   = GroqClient(models=settings.resolve_model_chain(None))
+        client   = GroqClient()
         result   = run_pipeline(selected, secrets, client=client)
 
         gate          = result["gate"]

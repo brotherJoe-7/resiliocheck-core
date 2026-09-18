@@ -45,13 +45,10 @@ log = logging.getLogger("resiliocheck.pipeline")
 
 # Backwards-compatible module constants
 GROQ_API_KEY = settings.GROQ_API_KEY
-GROQ_MODEL   = settings.GROQ_MODEL
 GROQ_URL     = settings.GROQ_URL
 
 SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
 VALID_SEVERITIES = set(SEVERITY_ORDER)
-
-DEFAULT_MODEL_CHAIN: list[str] = settings.resolve_model_chain(None)
 
 
 # ---------------------------------------------------------------------------
