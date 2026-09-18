@@ -41,7 +41,7 @@ export default function DocumentationPage() {
             </p>
           </section>
 
-          <section id="getting-started" style={{ marginBottom: 64 }}>
+          <section id="quickstart" style={{ marginBottom: 64 }}>
             <h2 style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: 20, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>Quick Start</h2>
             <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>Get up and running in under 5 minutes.</p>
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '20px 24px', fontFamily: 'monospace', fontSize: '0.85rem' }}>
@@ -93,6 +93,38 @@ export default function DocumentationPage() {
                 </div>
               </div>
             ))}
+          </section>
+
+          <section id="cli" style={{ marginBottom: 64 }}>
+            <h2 style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: 20, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>CLI Usage (Command Prompt)</h2>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>ResilioCheck provides a powerful Command Line Interface (CLI) for running deep autonomous security scans directly on your local machine using the Windows Command Prompt (or any other terminal). All the telemetry remains on your machine, leveraging the same advanced AI scanning engine.</p>
+            
+            <div style={{ marginBottom: 24 }}>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 12, color: 'var(--text-primary)' }}>1. Install the CLI</h3>
+              <p style={{ color: 'var(--text-secondary)', marginBottom: 12, fontSize: '0.9rem' }}>Navigate to the `resiliocheck-core` directory in your command prompt and run the following pip command to install the CLI globally:</p>
+              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '20px 24px', fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                <div style={{ color: 'var(--text-primary)' }}>pip install -e .</div>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 24 }}>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 12, color: 'var(--text-primary)' }}>2. Run a Local Scan</h3>
+              <p style={{ color: 'var(--text-secondary)', marginBottom: 12, fontSize: '0.9rem' }}>Once installed, you can analyze any local directory. The CLI will securely prompt you for your `GROQ_API_KEY` (and `GITHUB_TOKEN` for auto-PRs) if they are not already set in your `.env` file.</p>
+              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '20px 24px', fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                <div style={{ color: 'var(--text-muted)', marginBottom: 8 }}># Scan the current directory</div>
+                <div style={{ color: 'var(--text-primary)', marginBottom: 16 }}>resiliocheck .</div>
+                <div style={{ color: 'var(--text-muted)', marginBottom: 8 }}># Scan a specific path with a limit on files</div>
+                <div style={{ color: 'var(--text-primary)' }}>resiliocheck C:\path\to\your\project --max-files 1000</div>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 24 }}>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 12, color: 'var(--text-primary)' }}>3. Uninstall the CLI</h3>
+              <p style={{ color: 'var(--text-secondary)', marginBottom: 12, fontSize: '0.9rem' }}>If you need to remove the CLI from your system, you can uninstall it effortlessly using pip in your command prompt:</p>
+              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '20px 24px', fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                <div style={{ color: 'var(--text-primary)' }}>pip uninstall resiliocheck-core -y</div>
+              </div>
+            </div>
           </section>
 
           <section id="cicd" style={{ marginBottom: 64 }}>

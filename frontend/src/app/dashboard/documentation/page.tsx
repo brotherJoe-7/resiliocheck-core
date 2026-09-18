@@ -5,6 +5,7 @@ import { BookOpen, Code, Terminal, Server, Shield, Zap, RefreshCw, Key } from 'l
 const sections = [
   { id: 'introduction', label: 'Introduction', icon: BookOpen },
   { id: 'getting-started', label: 'Getting Started', icon: Zap },
+  { id: 'cli-usage', label: 'CLI Usage (Local)', icon: Terminal },
   { id: 'agents', label: 'AI Agents & Gates', icon: Shield },
   { id: 'integrations', label: 'CI/CD & Webhooks', icon: RefreshCw },
   { id: 'api-reference', label: 'API Reference', icon: Code },
@@ -66,6 +67,46 @@ export default function DashboardDocumentationPage() {
                 <div style={{ color: 'var(--text-primary)', marginBottom: 16 }}>uvicorn backend.main:app --reload --port 8000</div>
                 <div style={{ color: 'var(--text-muted)', marginBottom: 8 }}># 2. Start the Frontend Application</div>
                 <div style={{ color: 'var(--text-primary)' }}>cd frontend && npm run dev</div>
+              </div>
+            </section>
+
+            <section id="cli-usage" style={{ marginBottom: 64 }}>
+              <h2 style={{ fontSize: '1.6rem', fontWeight: 700, marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid var(--border)', color: 'var(--text-primary)' }}>CLI Usage (Local Scanner)</h2>
+              <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7, marginBottom: 16 }}>
+                You can run deep autonomous security scans directly on your local machine using the Windows Command Prompt (or any terminal). 
+                The CLI operates completely independently from the web dashboard, keeping all telemetry locally.
+              </p>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                {/* 1. Install */}
+                <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '20px' }}>
+                  <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 10, color: 'var(--text-primary)' }}>1. Install the CLI</h3>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 12 }}>Navigate to the `resiliocheck-core` directory in your command prompt and run the following command to install the CLI globally via pip:</p>
+                  <div style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 6, padding: '12px 16px', fontFamily: 'monospace', fontSize: '0.85rem', color: 'var(--text-primary)' }}>
+                    pip install -e .
+                  </div>
+                </div>
+
+                {/* 2. Run */}
+                <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '20px' }}>
+                  <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 10, color: 'var(--text-primary)' }}>2. Run a Local Scan</h3>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 12 }}>Scan any local directory. The CLI will securely prompt you for your API keys via the command prompt if they aren't configured in your environment.</p>
+                  <div style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 6, padding: '12px 16px', fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                    <div style={{ color: 'var(--text-muted)', marginBottom: 6 }}># Scan the current directory</div>
+                    <div style={{ color: 'var(--text-primary)', marginBottom: 12 }}>resiliocheck .</div>
+                    <div style={{ color: 'var(--text-muted)', marginBottom: 6 }}># Limit analysis to 500 files in a specific project</div>
+                    <div style={{ color: 'var(--text-primary)' }}>resiliocheck C:\path\to\your\project --max-files 500</div>
+                  </div>
+                </div>
+
+                {/* 3. Uninstall */}
+                <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '20px' }}>
+                  <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 10, color: 'var(--text-primary)' }}>3. Uninstall the CLI</h3>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 12 }}>To completely remove the CLI from your system via the command prompt, simply uninstall the package:</p>
+                  <div style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 6, padding: '12px 16px', fontFamily: 'monospace', fontSize: '0.85rem', color: 'var(--text-primary)' }}>
+                    pip uninstall resiliocheck-core -y
+                  </div>
+                </div>
               </div>
             </section>
 
