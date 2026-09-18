@@ -33,17 +33,17 @@ export default function Sidebar() {
   const sidebarContent = (
     <aside className={`rc-sidebar${mobileOpen ? ' mobile-open' : ''}`}>
       <div className="rc-sidebar-brand">
-        <Link href="/" style={{ textDecoration: 'none', display: 'block' }}>
+        <Link href="/" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center' }}>
           <Image
             src="/logo.jpg"
             alt="ResilioCheck AI"
-            width={160}
-            height={36}
-            style={{ objectFit: 'contain', width: '100%', height: 'auto', maxHeight: 36 }}
+            width={170}
+            height={42}
+            style={{ objectFit: 'contain', width: 'auto', height: 42 }}
             priority
           />
         </Link>
-        <div className="rc-sidebar-sub">Autonomous Security</div>
+        <div className="rc-sidebar-sub" style={{ marginTop: 6, marginLeft: 2 }}>Autonomous Security</div>
       </div>
 
       <nav className="rc-nav">
@@ -98,8 +98,8 @@ export default function Sidebar() {
         <button className="rc-mobile-topbar-btn" onClick={() => setMobileOpen(true)}>
           <Menu size={20} /> Menu
         </button>
-        <Link href="/" style={{ textDecoration: 'none' }}>
-          <Image src="/logo.jpg" alt="ResilioCheck AI" width={120} height={28} style={{ objectFit: 'contain', height: 28, width: 'auto' }} />
+        <Link href="/" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center' }}>
+          <Image src="/logo.jpg" alt="ResilioCheck AI" width={130} height={32} style={{ objectFit: 'contain', height: 32, width: 'auto' }} />
         </Link>
         <div style={{ width: 60 }} />
       </div>
