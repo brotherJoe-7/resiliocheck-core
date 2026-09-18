@@ -152,6 +152,7 @@ class GroqClient:
     waited: float = 0.0
     calls: int = 0
     last_model: str = ""
+    engine_label: str | None = None
 
     def _get_route(self, task_type: str) -> dict:
         routes = {
@@ -195,16 +196,26 @@ class GroqClient:
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
 
-        route = self._get_route(task_type)
-        primary_provider = route["provider"]
-        primary_model = route["model"]
+        if self.engine_label:
+            if "Qwen" in self.engine_label:
+                primary_provider, primary_model = "groq", "qwen/qwen3.8-27b"
+            elif "Allam" in self.engine_label:
+                primary_provider, primary_model = "groq", "allam-2-7b"
+            elif "20B" in self.engine_label:
+                primary_provider, primary_model = "groq", "openai/gpt-oss-20b"
+            else:
+                primary_provider, primary_model = "groq", "openai/gpt-oss-120b"
+        else:
+            route = self._get_route(task_type)
+            primary_provider = route["provider"]
+            primary_model = route["model"]
 
         fallback_chain = []
         if primary_provider == "groq":
             fallback_chain = [{"provider": "deepseek", "model": settings.DEEPSEEK_MODEL}]
 
         attempts = [{"provider": primary_provider, "model": primary_model}] + fallback_chain
-        last_error = ""
+        errors = []
         
         # Track models we've tried and exhausted
         dead_models = set()
@@ -223,7 +234,7 @@ class GroqClient:
                 url = f"{base_url.rstrip('/')}/chat/completions"
                 
                 if not ak:
-                    last_error = f"{provider.capitalize()} API key not configured."
+                    errors.append(f"{provider.capitalize()} API key not configured")
                     continue
 
                 self.calls += 1
@@ -238,7 +249,7 @@ class GroqClient:
                     )
                 except requests.RequestException as exc:
                     log.warning("[%s] network error on %s: %s", provider, model, exc)
-                    last_error = f"{model}: network error"
+                    errors.append(f"{model}: network error")
                     continue
 
                 if resp.ok:
@@ -247,7 +258,7 @@ class GroqClient:
 
                 status = resp.status_code
                 err_msg = self._error_message(resp)
-                last_error = f"{model}: HTTP {status} — {err_msg}"
+                errors.append(f"{model}: HTTP {status} — {err_msg}")
                 lowered = err_msg.lower()
 
                 if status in (401, 403):
@@ -276,7 +287,7 @@ class GroqClient:
                 log.warning("[%s] unexpected error %s on %s: %s", provider, status, model, err_msg)
                 
             # If we fall out of the for loop, all attempts failed
-            raise GroqModelUnavailable(f"All models in fallback chain failed. Last error: {last_error}")
+            raise GroqModelUnavailable(f"All models in fallback chain failed. Errors: {' | '.join(errors)}")
 
     @staticmethod
     def _error_message(resp: requests.Response) -> str:

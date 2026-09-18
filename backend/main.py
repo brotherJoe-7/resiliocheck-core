@@ -430,7 +430,7 @@ def _run_scan_blocking(repo_url: str, branch: str, engine_label: str, workspace_
     flagged  = run_local_sast_prefilter(workspace_dir)   # returns set() when sandbox tools unavailable
     selected = _select_files_for_ai(rel_srcs, flagged, secrets, settings.MAX_FILES_FOR_AI)
 
-    client = GroqClient()
+    client = GroqClient(engine_label=engine_label)
     pipe_res = run_pipeline(selected, secrets, client=client)
 
     verdict, logs = "SKIPPED", ""

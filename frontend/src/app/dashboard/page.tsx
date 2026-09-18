@@ -271,16 +271,16 @@ export default function DashboardPage() {
               <p style={{ marginBottom: 16 }}>It looks like you haven't run any scans yet. Here is how to get started:</p>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
                 <div style={{ padding: 16, background: 'var(--bg-base)', borderRadius: 8, border: '1px solid var(--border)' }}>
-                  <strong style={{ color: 'var(--text-primary)' }}>1. Connect GitHub (Optional)</strong><br />
-                  If you want to scan private repositories, click the "Connect GitHub" link below to authenticate via OAuth.
+                  <strong style={{ color: 'var(--text-primary)' }}>1. Provide a Target</strong><br />
+                  Paste any public (or authorized private) GitHub URL in the configuration panel below. To authorize private repos, use the <strong>Connect GitHub</strong> button.
                 </div>
                 <div style={{ padding: 16, background: 'var(--bg-base)', borderRadius: 8, border: '1px solid var(--border)' }}>
-                  <strong style={{ color: 'var(--text-primary)' }}>2. Enter a Repository URL</strong><br />
-                  Paste any public (or authorized private) GitHub URL and click <strong style={{ color: 'var(--accent)' }}>INITIATE SCAN</strong>.
+                  <strong style={{ color: 'var(--text-primary)' }}>2. Initiate AI Scan</strong><br />
+                  Select your preferred AI engine and click <strong style={{ color: 'var(--accent)' }}>INITIATE SCAN</strong>. Our models will automatically run SAST scans and sandbox validation.
                 </div>
                 <div style={{ padding: 16, background: 'var(--bg-base)', borderRadius: 8, border: '1px solid var(--border)' }}>
-                  <strong style={{ color: 'var(--text-primary)' }}>3. Review & Approve</strong><br />
-                  The LangChain agents will analyse your code. If severe vulnerabilities are found, you can review the patch and automatically create a Pull Request.
+                  <strong style={{ color: 'var(--text-primary)' }}>3. Fix & Merge</strong><br />
+                  If severe vulnerabilities are found, review the AI-generated patch and deploy it directly or open a Pull Request with one click.
                 </div>
               </div>
             </div>
