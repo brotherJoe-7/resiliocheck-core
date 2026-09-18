@@ -50,7 +50,7 @@ export default function Sidebar() {
         {NAV.map(({ href, label, Icon }) => {
           const active = pathname === href || (href !== '/dashboard' && pathname.startsWith(href));
           return (
-            <Link key={href} href={href} className={`rc-nav-item ${active ? 'active' : ''}`} onClick={() => setMobileOpen(false)}>
+            <Link id={`tour-nav-${label.replace(' ', '-').toLowerCase()}`} key={href} href={href} className={`rc-nav-item ${active ? 'active' : ''}`} onClick={() => setMobileOpen(false)}>
               <Icon size={16} />
               {label}
             </Link>
@@ -99,7 +99,7 @@ export default function Sidebar() {
           <Menu size={20} /> Menu
         </button>
         <Link href="/" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center' }}>
-          <Image src="/logo.jpg" alt="ResilioCheck AI" width={130} height={32} style={{ objectFit: 'contain', height: 32, width: 'auto' }} />
+          <Image src="/logo.jpg" alt="ResilioCheck AI" width={120} height={28} style={{ objectFit: 'contain', height: 28, width: 'auto' }} />
         </Link>
         <div style={{ width: 60 }} />
       </div>

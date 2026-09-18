@@ -16,9 +16,9 @@ export default function Navbar({ activeItem }: { activeItem?: string }) {
           <Image
             src="/logo.jpg"
             alt="ResilioCheck AI"
-            width={170}
-            height={42}
-            style={{ objectFit: 'contain', height: 42, width: 'auto' }}
+            width={180}
+            height={40}
+            style={{ objectFit: 'contain', height: 40, width: 'auto' }}
             priority
           />
         </Link>
