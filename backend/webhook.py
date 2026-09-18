@@ -102,6 +102,7 @@ def _run_webhook_scan(
     repo_full_name: str,
     user_id: int,
     github_token: str | None,
+    sender_login: str | None = None,
 ) -> None:
     """Full scan pipeline — runs in a background thread via FastAPI BackgroundTasks."""
     from backend.database import SessionLocal  # import here to avoid circular
@@ -166,6 +167,39 @@ def _run_webhook_scan(
             monitored.last_gate    = gate
 
         db.commit()
+        db.refresh(scan)
+
+        # Auto-create Pull Request if a patch was generated
+        if scan.patched_code and github_token:
+            try:
+                from backend.github_utils import create_github_pr
+                
+                # Fetch GitHub username for tagging, assuming repo_full_name has owner
+                # But actually we can tag the pusher if we have pusher_login from webhook body
+                # For simplicity, we just use the user_id's GitHub profile if available, or just skip tagging
+                # Or tag the committer (pusher)
+                
+                pr_url, target_branch = create_github_pr(
+                    github_token=github_token,
+                    repo_url=repo_url,
+                    base_branch=scan.branch,
+                    branch_name=f"resiliocheck-fix-{scan.id}",
+                    patched_file=result.get("patched_filename", "patch.txt"),
+                    patched_code=scan.patched_code,
+                    scan_id=scan.id,
+                    gate=scan.gate,
+                    gate_rationale=scan.gate_rationale,
+                    explanation=scan.explanation,
+                    critical_count=scan.critical_count,
+                    high_count=scan.high_count,
+                    tag_user=sender_login,
+                    direct=False
+                )
+                scan.patch_status = "APPLIED"
+                db.commit()
+                print(f"Auto-created PR for scan #{scan.id}: {pr_url}")
+            except Exception as e:
+                print(f"Failed to auto-create PR for scan #{scan.id}: {e}")
 
         # Post final commit status
         if gate == "APPROVED":
@@ -254,12 +288,11 @@ async def github_webhook(
         models.MonitoredRepo.repo_url == repo_url
     ).first()
 
-    github_token = None
+    github_token = settings.GITHUB_TOKEN
     user_id = 0
     if monitored:
         owner = db.query(models.User).filter(models.User.id == monitored.user_id).first()
         if owner:
-            github_token = decrypt_github_token(owner.github_token)
             user_id = owner.id
 
     log.info("WEBHOOK %s event for %s@%s — queuing scan", x_github_event, repo_url, sha[:8])
@@ -267,6 +300,7 @@ async def github_webhook(
     background_tasks.add_task(
         _run_webhook_scan,
         repo_url, branch, sha, repo_full_name, user_id, github_token,
+        payload.get("sender", {}).get("login")
     )
 
     return {"status": "accepted", "repo": repo_url, "sha": sha[:8], "branch": branch}

@@ -578,6 +578,35 @@ async def run_scan(req: ScanRequest, db: Session = Depends(get_db),
         current_user.last_scan_date = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).date()
         db.commit()
         db.refresh(result)
+        
+        # Auto-create Pull Request if a patch was generated
+        if result.patched_code:
+            github_token = settings.GITHUB_TOKEN
+            if github_token:
+                try:
+                    from backend.github_utils import create_github_pr
+                    pr_url, target_branch = create_github_pr(
+                        github_token=github_token,
+                        repo_url=repo_url,
+                        base_branch=branch,
+                        branch_name=f"resiliocheck-fix-{result.id}",
+                        patched_file=patched_filename,
+                        patched_code=patched_code,
+                        scan_id=result.id,
+                        gate=result.gate,
+                        gate_rationale=result.gate_rationale,
+                        explanation=result.explanation,
+                        critical_count=result.critical_count,
+                        high_count=result.high_count,
+                        tag_user=None,
+                        direct=False
+                    )
+                    result.patch_status = "APPLIED"
+                    db.commit()
+                    log.info("Auto-created PR for scan #%s: %s", result.id, pr_url)
+                except Exception as e:
+                    log.error("Failed to auto-create PR for scan #%s: %s", result.id, e)
+
         payload = _scan_to_dict(result)
         payload["sandbox_logs"] = outcome.get("sandbox_logs", "")
         payload["llm_calls"] = pipeline_result.get("llm_calls", 0)
@@ -634,8 +663,7 @@ def apply_patch_pr(scan_id: int, direct: bool = False, db: Session = Depends(get
     Creates a GitHub Pull Request applying the AI-generated patch.
     Uses GITHUB_TOKEN from .env to authenticate.
     """
-    import base64
-    import requests as http_requests
+    from backend.github_utils import create_github_pr
 
     scan = db.query(models.ScanResult).filter(models.ScanResult.id == scan_id).first()
     if not scan:
@@ -648,9 +676,9 @@ def apply_patch_pr(scan_id: int, direct: bool = False, db: Session = Depends(get
     if getattr(scan, "patch_status", "PENDING") == "APPLIED":
         raise HTTPException(status_code=400, detail="Patch already applied")
 
-    github_token = decrypt_github_token(current_user.github_token) or settings.GITHUB_TOKEN
+    github_token = settings.GITHUB_TOKEN
     if not github_token:
-        raise HTTPException(status_code=503, detail="No GitHub token available — connect your GitHub account in Settings or ask your admin to configure GITHUB_TOKEN on the server.")
+        raise HTTPException(status_code=503, detail="The platform's GITHUB_TOKEN is not configured on the server.")
 
     # Parse owner/repo from repo_url
     repo_url = scan.repo_url.rstrip("/")
@@ -665,87 +693,22 @@ def apply_patch_pr(scan_id: int, direct: bool = False, db: Session = Depends(get
         raise HTTPException(status_code=400, detail="Stored patch filename is invalid")
 
     try:
-        # ── 1. Get default branch SHA ──────────────────────────────────────────
-        headers = {
-            "Authorization": f"Bearer {github_token}",
-            "Accept":        "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-        }
-        ref_resp = http_requests.get(
-            f"https://api.github.com/repos/{owner}/{repo}/git/ref/heads/{scan.branch}",
-            headers=headers, timeout=15,
+        pr_url, target_branch = create_github_pr(
+            github_token=github_token,
+            repo_url=repo_url,
+            base_branch=scan.branch,
+            branch_name=branch_name,
+            patched_file=patched_file,
+            patched_code=scan.patched_code,
+            scan_id=scan_id,
+            gate=scan.gate,
+            gate_rationale=scan.gate_rationale,
+            explanation=scan.explanation,
+            critical_count=scan.critical_count,
+            high_count=scan.high_count,
+            tag_user=None, # In dashboard manual click, we don't necessarily tag
+            direct=direct
         )
-        if ref_resp.status_code != 200:
-            raise HTTPException(status_code=502, detail=f"GitHub ref lookup failed ({ref_resp.status_code}): {ref_resp.text[:300]}")
-        base_sha = ref_resp.json()["object"]["sha"]
-
-        # ── 2. Create fix branch ───────────────────────────────────────────────
-        if not direct:
-            create_branch = http_requests.post(
-                f"https://api.github.com/repos/{owner}/{repo}/git/refs",
-                headers=headers,
-                json={"ref": f"refs/heads/{branch_name}", "sha": base_sha},
-                timeout=15,
-            )
-            if create_branch.status_code not in (201, 422):   # 422 = already exists
-                raise HTTPException(status_code=502, detail=f"Branch creation failed ({create_branch.status_code}): {create_branch.text[:300]}")
-
-        # ── 3. Get current file SHA (needed for update) ────────────────────────
-        target_branch = scan.branch if direct else branch_name
-        file_resp = http_requests.get(
-            f"https://api.github.com/repos/{owner}/{repo}/contents/{patched_file}",
-            headers=headers,
-            params={"ref": target_branch},
-            timeout=15,
-        )
-        file_sha = file_resp.json().get("sha") if file_resp.status_code == 200 else None
-
-        # ── 4. Push patched file ───────────────────────────────────────────────
-        content_b64 = base64.b64encode(scan.patched_code.encode()).decode()
-        update_payload = {
-            "message": f"fix(resiliocheck): AI-generated security patch for scan #{scan_id}",
-            "content": content_b64,
-            "branch":  target_branch,
-        }
-        if file_sha:
-            update_payload["sha"] = file_sha
-
-        push_resp = http_requests.put(
-            f"https://api.github.com/repos/{owner}/{repo}/contents/{patched_file}",
-            headers=headers,
-            json=update_payload,
-            timeout=15,
-        )
-        if push_resp.status_code not in (200, 201):
-            raise HTTPException(status_code=502, detail=f"File push failed ({push_resp.status_code}): {push_resp.text[:300]}")
-
-        # ── 5. Open Pull Request ───────────────────────────────────────────────
-        if not direct:
-            pr_resp = http_requests.post(
-                f"https://api.github.com/repos/{owner}/{repo}/pulls",
-                headers=headers,
-                json={
-                    "title": f"[ResilioCheck AI] Security Fix — Scan #{scan_id}",
-                    "body":  (
-                        f"**Automated security patch generated by ResilioCheck AI.**\n\n"
-                        f"**Scanned Repository:** {scan.repo_url}\n"
-                        f"**Branch:** `{scan.branch}`\n"
-                        f"**Gate Verdict:** `{scan.gate}`\n"
-                        f"**Findings:** {scan.critical_count} critical, {scan.high_count} high\n\n"
-                        f"### Rationale\n{scan.gate_rationale}\n\n"
-                        f"### AI Explanation\n{scan.explanation}\n"
-                    ),
-                    "head": branch_name,
-                    "base": scan.branch,
-                },
-                timeout=15,
-            )
-            if pr_resp.status_code not in (200, 201):
-                raise HTTPException(status_code=502, detail=f"PR creation failed ({pr_resp.status_code}): {pr_resp.text[:300]}")
-
-            pr_url = pr_resp.json().get("html_url", "")
-        else:
-            pr_url = f"{repo_url.rstrip('/')}/commit/{push_resp.json()['commit']['sha']}"
 
         # ── 6. Mark scan as APPLIED ────────────────────────────────────────────
         scan.patch_status = "APPLIED"
@@ -755,9 +718,10 @@ def apply_patch_pr(scan_id: int, direct: bool = False, db: Session = Depends(get
 
     except HTTPException:
         raise
+    except ValueError as ve:
+        raise HTTPException(status_code=502, detail=str(ve))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"GitHub PR failed: {str(e)}")
-
 
 @app.post("/api/scans/{scan_id}/reject-patch")
 def reject_patch(scan_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
