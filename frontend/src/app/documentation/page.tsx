@@ -101,20 +101,24 @@ export default function DocumentationPage() {
             
             <div style={{ marginBottom: 24 }}>
               <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 12, color: 'var(--text-primary)' }}>1. Install the CLI</h3>
-              <p style={{ color: 'var(--text-secondary)', marginBottom: 12, fontSize: '0.9rem' }}>Navigate to the `resiliocheck-core` directory in your command prompt and run the following pip command to install the CLI globally:</p>
+              <p style={{ color: 'var(--text-secondary)', marginBottom: 12, fontSize: '0.9rem' }}>Open your command prompt, clone the repository, and install the CLI globally:</p>
               <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '20px 24px', fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                <div style={{ color: 'var(--text-muted)', marginBottom: 8 }}># Clone the repository</div>
+                <div style={{ color: 'var(--text-primary)', marginBottom: 16 }}>git clone https://github.com/brotherJoe-7/resiliocheck-core.git</div>
+                <div style={{ color: 'var(--text-primary)', marginBottom: 16 }}>cd resiliocheck-core</div>
+                <div style={{ color: 'var(--text-muted)', marginBottom: 8 }}># Install the CLI package globally</div>
                 <div style={{ color: 'var(--text-primary)' }}>pip install -e .</div>
               </div>
             </div>
 
             <div style={{ marginBottom: 24 }}>
               <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 12, color: 'var(--text-primary)' }}>2. Run a Local Scan</h3>
-              <p style={{ color: 'var(--text-secondary)', marginBottom: 12, fontSize: '0.9rem' }}>Once installed, you can analyze any local directory. The CLI will securely prompt you for your `GROQ_API_KEY` (and `GITHUB_TOKEN` for auto-PRs) if they are not already set in your `.env` file.</p>
+              <p style={{ color: 'var(--text-secondary)', marginBottom: 12, fontSize: '0.9rem' }}>Once installed, you can analyze any local directory. By default, it will scan the entire project folder comprehensively. The CLI will securely prompt you for your `GROQ_API_KEY` (and `GITHUB_TOKEN` for auto-PRs) if they are not already set in your `.env` file.</p>
               <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '20px 24px', fontFamily: 'monospace', fontSize: '0.85rem' }}>
-                <div style={{ color: 'var(--text-muted)', marginBottom: 8 }}># Scan the current directory</div>
+                <div style={{ color: 'var(--text-muted)', marginBottom: 8 }}># Deep scan the current directory</div>
                 <div style={{ color: 'var(--text-primary)', marginBottom: 16 }}>resiliocheck .</div>
-                <div style={{ color: 'var(--text-muted)', marginBottom: 8 }}># Scan a specific path with a limit on files</div>
-                <div style={{ color: 'var(--text-primary)' }}>resiliocheck C:\path\to\your\project --max-files 1000</div>
+                <div style={{ color: 'var(--text-muted)', marginBottom: 8 }}># Deep scan a specific project path</div>
+                <div style={{ color: 'var(--text-primary)' }}>resiliocheck C:\path\to\your\project</div>
               </div>
             </div>
 

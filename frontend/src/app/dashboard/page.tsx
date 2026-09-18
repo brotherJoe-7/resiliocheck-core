@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Sidebar from '../components/Sidebar';
 import ChatPanel from '../components/ChatPanel';
 import { Zap, Check, AlertTriangle, Hourglass, LayoutGrid, X, CheckCircle2, Sparkles } from 'lucide-react';
+import Joyride, { Step, CallBackProps, STATUS } from 'react-joyride';
 
 import type { ScanResult } from '@/app/types';
 
@@ -80,6 +81,47 @@ export default function DashboardPage() {
   const [now, setNow]                 = useState<number | null>(null);
   const [githubConnected, setGithubConnected] = useState<boolean>(false);
   const [chatOpen, setChatOpen] = useState(false);
+
+  // Joyride Onboarding Tour State
+  const [{ runTour, tourSteps }, setTourState] = useState({
+    runTour: false,
+    tourSteps: [
+      {
+        target: '#tour-repo-input',
+        content: 'Welcome! First, paste the link to your GitHub repository here. The AI will securely download and analyze the code instantly.',
+        disableBeacon: true,
+      },
+      {
+        target: '#tour-engine-select',
+        content: 'Next, select your AI Engine. The Deep Analysis model is incredibly thorough, while Fast Static Analysis is built for speed.',
+      },
+      {
+        target: '#tour-scan-button',
+        content: 'Click here to INITIATE SCAN. Our specialized agents will hunt for vulnerabilities across your codebase.',
+      },
+      {
+        target: '#tour-history-panel',
+        content: 'Once the scan completes, your intelligent vulnerability report and AI-generated fixes will appear right here!',
+      }
+    ] as Step[]
+  });
+
+  const handleJoyrideCallback = (data: CallBackProps) => {
+    const { status } = data;
+    if (([STATUS.FINISHED, STATUS.SKIPPED] as string[]).includes(status)) {
+      setTourState(prev => ({ ...prev, runTour: false }));
+    }
+  };
+
+  // Automatically start tour if history is 0 after loading
+  useEffect(() => {
+    if (!loading && history.length === 0 && !scanResult && !historyError) {
+      const timer = setTimeout(() => {
+        setTourState(prev => ({ ...prev, runTour: true }));
+      }, 500); // short delay to ensure DOM is ready
+      return () => clearTimeout(timer);
+    }
+  }, [loading, history.length, scanResult, historyError]);
 
   // Parse OAuth redirect params and session uptime
   useEffect(() => {
@@ -218,9 +260,44 @@ export default function DashboardPage() {
   }
 
   return (
-    <div>
+    <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg-base)' }}>
       <Sidebar />
-      <main className="rc-main">
+      <Joyride
+        callback={handleJoyrideCallback}
+        continuous
+        hideCloseButton
+        run={runTour}
+        scrollToFirstStep
+        showProgress
+        showSkipButton
+        steps={tourSteps}
+        styles={{
+          options: {
+            zIndex: 10000,
+            primaryColor: '#ea580c',
+            backgroundColor: 'var(--bg-card)',
+            textColor: 'var(--text-primary)',
+            overlayColor: 'rgba(0, 0, 0, 0.75)',
+            arrowColor: 'var(--bg-card)'
+          },
+          tooltipContainer: {
+            textAlign: 'left',
+          },
+          buttonNext: {
+            backgroundColor: 'var(--accent)',
+            fontSize: '0.85rem',
+            borderRadius: 6,
+          },
+          buttonBack: {
+            color: 'var(--text-secondary)',
+            marginRight: 10,
+          },
+          buttonSkip: {
+            color: 'var(--text-muted)',
+          }
+        }}
+      />
+      <main className="rc-main" style={{ position: 'relative' }}>
         {/* Page Header */}
         <div className="rc-page-hdr">
           <div>
@@ -260,7 +337,7 @@ export default function DashboardPage() {
           ))}
         </div>
 
-        {/* Onboarding / Getting Started (Shows only when no scans exist) */}
+        {/* Onboarding / Getting Started static banner (optional now that tour exists) */}
         {!loading && history.length === 0 && !scanResult && (
           <div className="rc-card" style={{ marginBottom: 24, borderLeft: '4px solid var(--accent)' }}>
             <div className="rc-card-hdr">
@@ -298,7 +375,7 @@ export default function DashboardPage() {
                 <span>Repository URL Target</span>
                 {githubConnected && <span style={{ fontSize: '0.75rem', color: 'var(--green)', fontWeight: 600 }}><Check size={12} style={{ display: 'inline', marginBottom: -2 }} /> GitHub Connected</span>}
               </label>
-              <input className="rc-input" value={repoUrl} onChange={e => setRepoUrl(e.target.value)} placeholder="https://github.com/owner/repo" />
+              <input id="tour-repo-input" className="rc-input" value={repoUrl} onChange={e => setRepoUrl(e.target.value)} placeholder="https://github.com/owner/repo" />
               {!githubConnected && (
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <span>Only public repositories can be scanned.</span>
@@ -327,12 +404,12 @@ export default function DashboardPage() {
               </div>
               <div>
                 <label className="rc-label">Analysis Engine Profile</label>
-                <select className="rc-select" value={engine} onChange={e => setEngine(e.target.value)}>
+                <select id="tour-engine-select" className="rc-select" value={engine} onChange={e => setEngine(e.target.value)}>
                   {ENGINE_OPTIONS.map(o => <option key={o}>{o}</option>)}
                 </select>
               </div>
             </div>
-            <button className="rc-btn-primary" onClick={handleScan} disabled={loading} style={{ width: '100%', justifyContent: 'center' }}>
+            <button id="tour-scan-button" className="rc-btn-primary" onClick={handleScan} disabled={loading} style={{ width: '100%', justifyContent: 'center' }}>
               {loading ? <><Hourglass size={16} /> Running 3-Stage AI Pipeline...</> : <><Zap size={16} /> INITIATE SCAN</>}
             </button>
             {error && (
@@ -521,7 +598,7 @@ export default function DashboardPage() {
         )}
 
         {/* Historical Log — from DB */}
-        <div className="rc-card" style={{ marginBottom: 24 }}>
+        <div id="tour-history-panel" className="rc-card" style={{ marginBottom: 24 }}>
           <div className="rc-card-hdr">
             <div className="rc-card-title">📦 Historical Evaluation Log Records</div>
             <span style={{ fontSize: '0.72rem', color: historyError ? 'var(--red)' : 'var(--text-muted)' }}>{historyError || `${history.length} scan(s) in database`}</span>

@@ -31,25 +31,8 @@ export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
     document.documentElement.setAttribute('data-theme', localTheme);
     document.documentElement.setAttribute('data-mode', localMode);
 
-    // 2. Fetch from backend to sync (for logged in users)
-    const fetchTheme = async () => {
-      try {
-        const data = await apiJson('/api/settings') as { theme?: string; mode?: string };
-        if (data.theme || data.mode) {
-          const t = data.theme || 'orange';
-          const m = data.mode || 'dark';
-          setThemeState(t);
-          setModeState(m);
-          document.documentElement.setAttribute('data-theme', t);
-          document.documentElement.setAttribute('data-mode', m);
-          localStorage.setItem('rc-theme', t);
-          localStorage.setItem('rc-mode', m);
-        }
-      } catch {
-        // If not logged in, just rely on the localStorage values we already set above.
-      }
-    };
-    fetchTheme();
+    // 2. We remove backend fetching for theme to prevent overwriting user's local preference on refresh.
+    // The theme is now fully persistent via localStorage instantly.
   }, []);
 
   const setTheme = (newTheme: string) => {

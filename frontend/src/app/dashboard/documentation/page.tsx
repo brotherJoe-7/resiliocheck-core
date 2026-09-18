@@ -81,21 +81,25 @@ export default function DashboardDocumentationPage() {
                 {/* 1. Install */}
                 <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '20px' }}>
                   <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 10, color: 'var(--text-primary)' }}>1. Install the CLI</h3>
-                  <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 12 }}>Navigate to the `resiliocheck-core` directory in your command prompt and run the following command to install the CLI globally via pip:</p>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 12 }}>Open your command prompt, clone the repository, and install the CLI globally:</p>
                   <div style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 6, padding: '12px 16px', fontFamily: 'monospace', fontSize: '0.85rem', color: 'var(--text-primary)' }}>
-                    pip install -e .
+                    <div style={{ color: 'var(--text-muted)', marginBottom: 6 }}># Clone the repository</div>
+                    <div style={{ marginBottom: 12 }}>git clone https://github.com/brotherJoe-7/resiliocheck-core.git</div>
+                    <div style={{ marginBottom: 12 }}>cd resiliocheck-core</div>
+                    <div style={{ color: 'var(--text-muted)', marginBottom: 6 }}># Install the CLI package globally</div>
+                    <div>pip install -e .</div>
                   </div>
                 </div>
 
                 {/* 2. Run */}
                 <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '20px' }}>
                   <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 10, color: 'var(--text-primary)' }}>2. Run a Local Scan</h3>
-                  <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 12 }}>Scan any local directory. The CLI will securely prompt you for your API keys via the command prompt if they aren't configured in your environment.</p>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 12 }}>Scan any local directory. By default, it will scan the entire project folder comprehensively. The CLI will securely prompt you for your API keys via the command prompt if they aren't configured in your environment.</p>
                   <div style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 6, padding: '12px 16px', fontFamily: 'monospace', fontSize: '0.85rem' }}>
-                    <div style={{ color: 'var(--text-muted)', marginBottom: 6 }}># Scan the current directory</div>
+                    <div style={{ color: 'var(--text-muted)', marginBottom: 6 }}># Deep scan the current directory</div>
                     <div style={{ color: 'var(--text-primary)', marginBottom: 12 }}>resiliocheck .</div>
-                    <div style={{ color: 'var(--text-muted)', marginBottom: 6 }}># Limit analysis to 500 files in a specific project</div>
-                    <div style={{ color: 'var(--text-primary)' }}>resiliocheck C:\path\to\your\project --max-files 500</div>
+                    <div style={{ color: 'var(--text-muted)', marginBottom: 6 }}># Deep scan a specific project path</div>
+                    <div style={{ color: 'var(--text-primary)' }}>resiliocheck C:\path\to\your\project</div>
                   </div>
                 </div>
 
