@@ -1,22 +1,23 @@
 @import "tailwindcss";
 
 :root, [data-theme="orange"] {
-  --bg-base: #181818;
-  --bg-card: #222222;
-  --bg-card-hover: #2a2a2a;
-  --border: #333333;
-  --border-light: #444444;
+  --bg-base: #0d0d0f;
+  --bg-card: #141417;
+  --bg-sidebar: #222222;
+  --bg-card-hover: #1a1a1e;
+  --border: #27272a;
+  --border-light: #3f3f46;
   --accent: #ea580c;
   --accent-bright: #f97316;
   --green: #22c55e;
   --red: #ef4444;
   --yellow: #eab308;
   --teal: #14b8a6;
-  --text-primary: #f0f0f0;
-  --text-secondary: #a3a3a3;
-  --text-muted: #737373;
-  --nav-bg: rgba(24, 24, 24, 0.85);
-  --sidebar-w: 240px;
+  --text-primary: #fafafa;
+  --text-secondary: #a1a1aa;
+  --text-muted: #52525b;
+  --nav-bg: rgba(9, 9, 11, 0.85);
+  --sidebar-w: 210px;
 }
 
 [data-theme="blue"] {
@@ -37,6 +38,7 @@
 [data-mode="light"] {
   --bg-base: #f4f4f5;
   --bg-card: #ffffff;
+  --bg-sidebar: #f4f4f5;
   --bg-card-hover: #fafafa;
   --border: #e4e4e7;
   --border-light: #d4d4d8;
@@ -67,7 +69,7 @@
   .rc-sidebar {
     position: fixed; top: 0; left: 0; bottom: 0;
     width: var(--sidebar-w);
-    background: var(--bg-card);
+    background: var(--bg-sidebar);
     border-right: 1px solid var(--border);
     display: flex; flex-direction: column;
     z-index: 50;
