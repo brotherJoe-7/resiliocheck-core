@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Sidebar from '../components/Sidebar';
 import ChatPanel from '../components/ChatPanel';
 import { Zap, Check, AlertTriangle, Hourglass, LayoutGrid, X, CheckCircle2, Sparkles } from 'lucide-react';
-import Joyride, { Step, CallBackProps, STATUS } from 'react-joyride';
+import { Joyride, Step, STATUS } from 'react-joyride';
 
 import type { ScanResult } from '@/app/types';
 
@@ -106,7 +106,7 @@ export default function DashboardPage() {
     ] as Step[]
   });
 
-  const handleJoyrideCallback = (data: CallBackProps) => {
+  const handleJoyrideCallback = (data: any) => {
     const { status } = data;
     if (([STATUS.FINISHED, STATUS.SKIPPED] as string[]).includes(status)) {
       setTourState(prev => ({ ...prev, runTour: false }));
@@ -263,27 +263,26 @@ export default function DashboardPage() {
     <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg-base)' }}>
       <Sidebar />
       <Joyride
-        callback={handleJoyrideCallback}
+        onEvent={handleJoyrideCallback}
         continuous
-        hideCloseButton
         run={runTour}
         scrollToFirstStep
-        showProgress
-        showSkipButton
         steps={tourSteps}
+        options={{
+          zIndex: 10000,
+          primaryColor: '#ea580c',
+          backgroundColor: 'var(--bg-card)',
+          textColor: 'var(--text-primary)',
+          overlayColor: 'rgba(0, 0, 0, 0.75)',
+          arrowColor: 'var(--bg-card)',
+          showProgress: true,
+          buttons: ['back', 'primary', 'skip']
+        }}
         styles={{
-          options: {
-            zIndex: 10000,
-            primaryColor: '#ea580c',
-            backgroundColor: 'var(--bg-card)',
-            textColor: 'var(--text-primary)',
-            overlayColor: 'rgba(0, 0, 0, 0.75)',
-            arrowColor: 'var(--bg-card)'
-          },
           tooltipContainer: {
             textAlign: 'left',
           },
-          buttonNext: {
+          buttonPrimary: {
             backgroundColor: 'var(--accent)',
             fontSize: '0.85rem',
             borderRadius: 6,
