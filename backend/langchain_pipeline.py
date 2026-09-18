@@ -486,7 +486,7 @@ def run_owasp_agent(client: GroqClient, source_files: dict, secret_findings: lis
             + code_ctx
         )
         try:
-            raw = client.chat(OWASP_SYSTEM_PROMPT, user_msg, temperature=settings.LLM_TEMPERATURE, json_mode=True, task_type="triage")
+            raw = client.chat(OWASP_SYSTEM_PROMPT, user_msg, temperature=settings.LLM_TEMPERATURE, task_type="triage")
             break
         except GroqPayloadTooLarge as exc:
             if attempts >= 3:
@@ -530,7 +530,7 @@ def run_gate_agent(client: GroqClient | None, owasp_result: dict) -> dict:
             "deterministic_verdict": gate,
         })
         try:
-            raw = client.chat(GATE_DECISION_SYSTEM_PROMPT, user_msg, temperature=0.0, max_tokens=200, json_mode=True, task_type="classify")
+            raw = client.chat(GATE_DECISION_SYSTEM_PROMPT, user_msg, temperature=0.0, max_tokens=200, task_type="classify")
             llm = _parse_json(raw, {})
             if str(llm.get("gate", "")).upper() == "BLOCKED" and gate != "BLOCKED":
                 result["gate"] = "BLOCKED"
