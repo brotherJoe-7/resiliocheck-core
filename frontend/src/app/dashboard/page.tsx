@@ -10,8 +10,7 @@ import type { ScanResult } from '@/app/types';
 const ENGINE_OPTIONS = [
   'Groq GPT-OSS 120B Deep Static Analysis (SAST)',
   'Groq GPT-OSS 20B Fast Static Analysis (SAST)',
-  'Qwen 3.8-27B Deep Static Analysis (SAST)',
-  'Allam 2-7B Fast Static Analysis (SAST)',
+  'DeepSeek V4.1 Flash (Fallback / Batch)',
 ];
 
 function errorMessage(e: unknown, fallback: string): string {

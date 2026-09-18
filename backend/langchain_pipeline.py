@@ -197,10 +197,8 @@ class GroqClient:
             payload["response_format"] = {"type": "json_object"}
 
         if self.engine_label:
-            if "Qwen" in self.engine_label:
-                primary_provider, primary_model = "groq", "qwen/qwen3.8-27b"
-            elif "Allam" in self.engine_label:
-                primary_provider, primary_model = "groq", "allam-2-7b"
+            if "DeepSeek" in self.engine_label:
+                primary_provider, primary_model = "deepseek", settings.DEEPSEEK_MODEL
             elif "20B" in self.engine_label:
                 primary_provider, primary_model = "groq", "openai/gpt-oss-20b"
             else:
