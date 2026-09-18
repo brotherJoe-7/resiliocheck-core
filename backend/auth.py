@@ -10,6 +10,7 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 from backend import settings
 from backend.database import get_db
 from backend.models import User
+from cryptography.fernet import Fernet
 
 log = logging.getLogger("resiliocheck.auth")
 
@@ -28,6 +29,19 @@ ACCESS_TOKEN_EXPIRE_HOURS = settings.ACCESS_TOKEN_EXPIRE_HOURS
 
 bearer_scheme = HTTPBearer(auto_error=False)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+def get_fernet() -> Fernet:
+    if not settings.TOKEN_ENCRYPTION_KEY:
+        log.warning("TOKEN_ENCRYPTION_KEY not set. Falling back to an ephemeral key for development.")
+        return Fernet(Fernet.generate_key())
+    return Fernet(settings.TOKEN_ENCRYPTION_KEY.encode())
+
+def decrypt_github_token(token: str | None) -> str | None:
+    if not token: return None
+    try:
+        return get_fernet().decrypt(token.encode()).decode()
+    except Exception:
+        return token
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -116,22 +130,31 @@ class RateLimiter:
     def __init__(self, max_calls: int, time_window: int):
         self.max_calls = max_calls
         self.time_window = time_window
-        self.clients = defaultdict(list)
+        self.clients = {}
     
     def __call__(self, request: Request):
+        # Prevent X-Forwarded-For spoofing: take the last IP appended by the trusted proxy
         forwarded = request.headers.get("X-Forwarded-For")
         if forwarded:
-            ip = forwarded.split(",")[0].strip()
+            ip = forwarded.split(",")[-1].strip()
         else:
             ip = request.client.host if request.client else "unknown"
             
         now = time.time()
-        self.clients[ip] = [t for t in self.clients[ip] if now - t < self.time_window]
         
-        if len(self.clients[ip]) >= self.max_calls:
+        # Prevent memory leaks by periodically purging stale IPs
+        if len(self.clients) > 1000:
+            self.clients = {k: v for k, v in self.clients.items() if v and now - v[-1] < self.time_window}
+            
+        history = self.clients.get(ip, [])
+        history = [t for t in history if now - t < self.time_window]
+        
+        if len(history) >= self.max_calls:
+            self.clients[ip] = history
             raise HTTPException(status_code=429, detail="Too many attempts. Please try again later.")
             
-        self.clients[ip].append(now)
+        history.append(now)
+        self.clients[ip] = history
 
 login_limiter = RateLimiter(max_calls=5, time_window=60)
 
@@ -181,7 +204,8 @@ def get_me(current_user: User = Depends(get_current_user)):
     # Reset today's counter if it's a new day (handle stale DB reads)
     scans_today = current_user.scans_today or 0
     last_date = current_user.last_scan_date
-    if last_date is None or last_date < _date.today():
+    today = datetime.now(timezone.utc).date()
+    if last_date is None or last_date < today:
         scans_today = 0
     limit = _s.DAILY_SCAN_LIMIT_USER if current_user.role == "user" else None
     return {
@@ -241,9 +265,11 @@ def github_login(current_user: User = Depends(get_current_user)):
             status_code=503,
             detail="GitHub OAuth is not configured on this server. Contact your administrator.",
         )
-    # Re-use the user's current JWT as the state token.
-    # The callback will decode it to identify the user.
-    state = create_access_token({"sub": current_user.email, "role": current_user.role})
+    # Create a short-lived token (5 minutes) specifically for OAuth state
+    to_encode = {"sub": current_user.email, "role": current_user.role}
+    expire = datetime.now(timezone.utc) + timedelta(minutes=5)
+    to_encode.update({"exp": expire})
+    state = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     params = urllib.parse.urlencode({
         "client_id": settings.GITHUB_CLIENT_ID,
         "scope":     "repo read:user",          # 'repo' covers private repos
@@ -311,8 +337,10 @@ def github_callback(
         log.warning("GitHub did not return an access token: %s", gh_error)
         return _redirect_to_frontend(frontend, success=False, reason=gh_error)
 
-    # Persist the token on the user's profile
-    user.github_token = access_token
+    # Persist the token on the user's profile (encrypted)
+    fernet = get_fernet()
+    encrypted_token = fernet.encrypt(access_token.encode()).decode()
+    user.github_token = encrypted_token
     db.commit()
     log.info("GitHub OAuth token stored for user %s", user.email)
 

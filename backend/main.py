@@ -33,7 +33,7 @@ from backend.langchain_pipeline import (
 )
 from backend.database import engine, get_db
 from backend import models, auth, admin
-from backend.auth import get_current_user
+from backend.auth import get_current_user, get_fernet, decrypt_github_token
 from backend import webhook
 
 logging.basicConfig(
@@ -110,7 +110,6 @@ for _local in ("http://localhost:3000", "http://127.0.0.1:3000"):
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
-    allow_origin_regex=r"https://.*\.(vercel\.app|e2b\.dev|run\.app)$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -469,7 +468,7 @@ async def run_scan(req: ScanRequest, db: Session = Depends(get_db),
     # ── Daily rate-limit check (regular users only) ────────────────────────
     if current_user.role == "user":
         from datetime import date as _date
-        today = _date.today()
+        today = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).date()
         last = current_user.last_scan_date
         # Reset counter if it's a new calendar day (UTC)
         if last is None or last < today:
@@ -503,7 +502,7 @@ async def run_scan(req: ScanRequest, db: Session = Depends(get_db),
 
         outcome = await run_in_threadpool(
             _run_scan_blocking, repo_url, branch, req.engine, workspace_dir,
-            current_user.github_token or None,
+            decrypt_github_token(current_user.github_token) or None,
         )
 
         if outcome.get("empty"):
@@ -516,7 +515,7 @@ async def run_scan(req: ScanRequest, db: Session = Depends(get_db),
             db.add(result)
             current_user.scan_count = (current_user.scan_count or 0) + 1
             current_user.scans_today = (current_user.scans_today or 0) + 1
-            current_user.last_scan_date = __import__("datetime").date.today()
+            current_user.last_scan_date = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).date()
             db.commit()
             db.refresh(result)
             return _scan_to_dict(result)
@@ -576,7 +575,7 @@ async def run_scan(req: ScanRequest, db: Session = Depends(get_db),
 
         current_user.scan_count = (current_user.scan_count or 0) + 1
         current_user.scans_today = (current_user.scans_today or 0) + 1
-        current_user.last_scan_date = __import__("datetime").date.today()
+        current_user.last_scan_date = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).date()
         db.commit()
         db.refresh(result)
         payload = _scan_to_dict(result)
@@ -649,7 +648,7 @@ def apply_patch_pr(scan_id: int, direct: bool = False, db: Session = Depends(get
     if getattr(scan, "patch_status", "PENDING") == "APPLIED":
         raise HTTPException(status_code=400, detail="Patch already applied")
 
-    github_token = settings.GITHUB_TOKEN or current_user.github_token
+    github_token = decrypt_github_token(current_user.github_token) or settings.GITHUB_TOKEN
     if not github_token:
         raise HTTPException(status_code=503, detail="No GitHub token available — connect your GitHub account in Settings or ask your admin to configure GITHUB_TOKEN on the server.")
 
@@ -893,7 +892,11 @@ def get_deployments(db: Session = Depends(get_db), current_user: models.User = D
     Derive deployments dynamically from the 10 most recent scan results.
     Each scan = one deployment entry with a real status and security gate verdict.
     """
-    scans = db.query(models.ScanResult).order_by(models.ScanResult.id.desc()).limit(10).all()
+    if current_user.role in ("admin", "superadmin"):
+        scans = db.query(models.ScanResult).order_by(models.ScanResult.id.desc()).limit(10).all()
+    else:
+        scans = db.query(models.ScanResult).filter(models.ScanResult.user_id == current_user.id).order_by(models.ScanResult.id.desc()).limit(10).all()
+        
     if not scans:
         return []
 
@@ -926,6 +929,8 @@ def get_scan_detail(scan_id: int, db: Session = Depends(get_db), current_user: m
     s = db.query(models.ScanResult).filter(models.ScanResult.id == scan_id).first()
     if not s:
         raise HTTPException(status_code=404, detail="Scan not found")
+    if s.user_id != current_user.id and current_user.role not in ("admin", "superadmin"):
+        raise HTTPException(status_code=403, detail="Not authorized to view this scan")
     return _scan_to_dict(s)
 
 
@@ -1042,7 +1047,7 @@ def add_monitored_repo(
     repo_full_name = req.repo_url.replace("https://github.com/", "")
     webhook_url = f"{settings.BACKEND_URL.rstrip('/')}/api/webhooks/github"
     headers = {
-        "Authorization": f"Bearer {current_user.github_token}",
+        "Authorization": f"Bearer {decrypt_github_token(current_user.github_token)}",
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }

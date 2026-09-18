@@ -354,11 +354,13 @@ def scan_for_secrets(source_files):
                     if label in ("Generic API Key", "Generic Secret/Token", "Hardcoded Password") \
                             and _PLACEHOLDER_RE.search(line):
                         continue
+                    snippet = line.strip()[:120]
+                    masked_snippet = snippet[:4] + "****...****" + snippet[-4:] if len(snippet) > 12 else "****"
                     findings.append({
                         "file":    basename,
                         "line":    lineno,
                         "pattern": label,
-                        "snippet": line.strip()[:120],
+                        "snippet": masked_snippet,
                     })
                     break  # one finding per line is enough
     return findings
@@ -532,7 +534,7 @@ def apply_patch_and_validate(workspace_dir, patched_code, patched_filename="patc
         sast_json_str = ""
         if (ext == ".py" or project_type == "python") and _tool_exists("bandit"):
             r = subprocess.run(
-                ["bandit", "-r", abs_workspace, "-f", "json", "-ll", "-q",
+                ["bandit", "-r", patched_file_path, "-f", "json", "-ll", "-q",
                  "--exclude", os.path.join(abs_workspace, "node_modules")],
                 capture_output=True, text=True, timeout=timeout
             )
@@ -543,7 +545,7 @@ def apply_patch_and_validate(workspace_dir, patched_code, patched_filename="patc
             if _tool_exists("semgrep"):
                 config = "p/typescript" if ext in (".ts", ".tsx") else "p/javascript"
                 r = subprocess.run(
-                    ["semgrep", "--config", config, abs_workspace,
+                    ["semgrep", "--config", config, patched_file_path,
                      "--json", "--quiet"],
                     capture_output=True, text=True, timeout=timeout
                 )
@@ -553,7 +555,7 @@ def apply_patch_and_validate(workspace_dir, patched_code, patched_filename="patc
         else:
             if _tool_exists("semgrep"):
                 r = subprocess.run(
-                    ["semgrep", "--config", "p/secrets", abs_workspace,
+                    ["semgrep", "--config", "p/secrets", patched_file_path,
                      "--json", "--quiet"],
                     capture_output=True, text=True, timeout=timeout
                 )

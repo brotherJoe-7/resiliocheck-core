@@ -11,3 +11,4 @@ tenacity>=8.2
 psycopg2-binary>=2.9
 semgrep>=1.70.0
 bandit>=1.7.9
+cryptography>=43.0.1

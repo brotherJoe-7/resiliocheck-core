@@ -46,6 +46,7 @@ def _env_bool(name: str, default: bool) -> bool:
 # ── Environment ─────────────────────────────────────────────────────────────
 ENVIRONMENT: str = _env("ENVIRONMENT", "development").lower()
 IS_PRODUCTION: bool = ENVIRONMENT in ("production", "prod")
+DATABASE_URL: str = _env("DATABASE_URL", "sqlite:///./resiliocheck.db")
 
 # ── Groq / LLM ──────────────────────────────────────────────────────────────
 GROQ_API_KEY: str = _env("GROQ_API_KEY")
@@ -95,6 +96,7 @@ GITHUB_CLIENT_SECRET: str = _env("GITHUB_CLIENT_SECRET")
 
 # ── Auth ────────────────────────────────────────────────────────────────────
 JWT_SECRET_KEY: str = _env("JWT_SECRET_KEY")
+TOKEN_ENCRYPTION_KEY: str = _env("TOKEN_ENCRYPTION_KEY")
 ACCESS_TOKEN_EXPIRE_HOURS: int = _env_int("ACCESS_TOKEN_EXPIRE_HOURS", 168)  # 7 days
 
 # ── CORS ────────────────────────────────────────────────────────────────────

@@ -147,7 +147,7 @@ class GroqClient:
     request_timeout: float = field(default_factory=lambda: float(settings.LLM_REQUEST_TIMEOUT_SECONDS))
     tpm_budget: int = field(default_factory=lambda: settings.LLM_TPM_BUDGET)
     post: Callable[..., requests.Response] | None = field(default=None, repr=False)
-    sleep: Callable[[float], None] | None = field(default=None, repr=False)
+    sleep: Callable[[float], None] | None = field(default_factory=lambda: __import__('time').sleep, repr=False)
 
     waited: float = 0.0
     calls: int = 0
@@ -269,10 +269,17 @@ class GroqClient:
                         log.warning("[%s] daily quota exhausted on %s; skipping model", provider, model)
                         dead_models.add(model)
                         continue
-                    if "too large" in lowered or "tokens per minute" in lowered and "request" in lowered:
+                    if ("too large" in lowered or "tokens per minute" in lowered) and "request" in lowered:
                         raise GroqPayloadTooLarge(f"{provider} 429: {err_msg}")
                         
-                    log.warning("[%s] %s rate-limited (retry-after≈%.1fs): %s", provider, model, wait, err_msg)
+                    # Standard rate limit: sleep and retry if budget allows
+                    if self.sleep and self.waited + wait <= self.max_total_wait:
+                        log.warning("[%s] %s rate-limited (retry-after≈%.1fs): sleeping...", provider, model, wait)
+                        self.sleep(wait)
+                        self.waited += wait
+                        break # break out of 'for attempt in attempts' to retry the while True loop
+                        
+                    log.warning("[%s] %s rate-limited (wait %.1fs > budget %.1fs), skipping...", provider, model, wait, self.max_total_wait - self.waited)
                     continue
 
                 if status in (500, 502, 503, 504):
@@ -284,8 +291,9 @@ class GroqClient:
                     
                 log.warning("[%s] unexpected error %s on %s: %s", provider, status, model, err_msg)
                 
-            # If we fall out of the for loop, all attempts failed
-            raise GroqModelUnavailable(f"All models in fallback chain failed. Errors: {' | '.join(errors)}")
+            # If we didn't break out of the attempts loop to retry, then all attempts failed
+            else:
+                raise GroqModelUnavailable(f"All models in fallback chain failed. Errors: {' | '.join(errors)}")
 
     @staticmethod
     def _error_message(resp: requests.Response) -> str:
@@ -717,7 +725,7 @@ def run_pipeline(source_files: dict, secret_findings: list, *, models: list[str]
     ``secret_findings`` — output of core.scan_for_secrets()
     """
     if client is None:
-        client = GroqClient(models=models or list(DEFAULT_MODEL_CHAIN))
+        client = GroqClient()
     if not client.api_key:
         raise GroqAuthError("GROQ_API_KEY is not configured on the server.")
 

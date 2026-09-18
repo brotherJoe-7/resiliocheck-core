@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 import requests as _http
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
 from sqlalchemy.orm import Session
+from backend.auth import decrypt_github_token
 
 from backend import models, settings
 from backend.auth import get_current_user
@@ -258,7 +259,7 @@ async def github_webhook(
     if monitored:
         owner = db.query(models.User).filter(models.User.id == monitored.user_id).first()
         if owner:
-            github_token = owner.github_token
+            github_token = decrypt_github_token(owner.github_token)
             user_id = owner.id
 
     log.info("WEBHOOK %s event for %s@%s — queuing scan", x_github_event, repo_url, sha[:8])
