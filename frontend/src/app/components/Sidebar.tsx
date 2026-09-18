@@ -37,9 +37,9 @@ export default function Sidebar() {
           <Image
             src="/logo.jpg"
             alt="ResilioCheck AI"
-            width={170}
-            height={42}
-            style={{ objectFit: 'contain', width: 'auto', height: 42 }}
+            width={160}
+            height={36}
+            style={{ objectFit: 'contain', width: 'auto', height: 36 }}
             priority
           />
         </Link>

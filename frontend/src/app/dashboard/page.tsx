@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback } from 'react';
 import Sidebar from '../components/Sidebar';
 import ChatPanel from '../components/ChatPanel';
 import { Zap, Check, AlertTriangle, Hourglass, LayoutGrid, X, CheckCircle2, Sparkles } from 'lucide-react';
-import { Joyride, Step, STATUS } from 'react-joyride';
 
 import type { ScanResult } from '@/app/types';
 
@@ -82,46 +81,6 @@ export default function DashboardPage() {
   const [githubConnected, setGithubConnected] = useState<boolean>(false);
   const [chatOpen, setChatOpen] = useState(false);
 
-  // Joyride Onboarding Tour State
-  const [{ runTour, tourSteps }, setTourState] = useState({
-    runTour: false,
-    tourSteps: [
-      {
-        target: '#tour-repo-input',
-        content: 'Welcome! First, paste the link to your GitHub repository here. The AI will securely download and analyze the code instantly.',
-        disableBeacon: true,
-      },
-      {
-        target: '#tour-engine-select',
-        content: 'Next, select your AI Engine. The Deep Analysis model is incredibly thorough, while Fast Static Analysis is built for speed.',
-      },
-      {
-        target: '#tour-scan-button',
-        content: 'Click here to INITIATE SCAN. Our specialized agents will hunt for vulnerabilities across your codebase.',
-      },
-      {
-        target: '#tour-history-panel',
-        content: 'Once the scan completes, your intelligent vulnerability report and AI-generated fixes will appear right here!',
-      }
-    ] as Step[]
-  });
-
-  const handleJoyrideCallback = (data: any) => {
-    const { status } = data;
-    if (([STATUS.FINISHED, STATUS.SKIPPED] as string[]).includes(status)) {
-      setTourState(prev => ({ ...prev, runTour: false }));
-    }
-  };
-
-  // Automatically start tour if history is 0 after loading
-  useEffect(() => {
-    if (!loading && history.length === 0 && !scanResult && !historyError) {
-      const timer = setTimeout(() => {
-        setTourState(prev => ({ ...prev, runTour: true }));
-      }, 500); // short delay to ensure DOM is ready
-      return () => clearTimeout(timer);
-    }
-  }, [loading, history.length, scanResult, historyError]);
 
   // Parse OAuth redirect params and session uptime
   useEffect(() => {
@@ -262,40 +221,6 @@ export default function DashboardPage() {
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg-base)' }}>
       <Sidebar />
-      <Joyride
-        onEvent={handleJoyrideCallback}
-        continuous
-        run={runTour}
-        scrollToFirstStep
-        steps={tourSteps}
-        options={{
-          zIndex: 10000,
-          primaryColor: '#ea580c',
-          backgroundColor: 'var(--bg-card)',
-          textColor: 'var(--text-primary)',
-          overlayColor: 'rgba(0, 0, 0, 0.75)',
-          arrowColor: 'var(--bg-card)',
-          showProgress: true,
-          buttons: ['back', 'primary', 'skip']
-        }}
-        styles={{
-          tooltipContainer: {
-            textAlign: 'left',
-          },
-          buttonPrimary: {
-            backgroundColor: 'var(--accent)',
-            fontSize: '0.85rem',
-            borderRadius: 6,
-          },
-          buttonBack: {
-            color: 'var(--text-secondary)',
-            marginRight: 10,
-          },
-          buttonSkip: {
-            color: 'var(--text-muted)',
-          }
-        }}
-      />
       <main className="rc-main" style={{ position: 'relative' }}>
         {/* Page Header */}
         <div className="rc-page-hdr">
@@ -336,7 +261,7 @@ export default function DashboardPage() {
           ))}
         </div>
 
-        {/* Onboarding / Getting Started static banner (optional now that tour exists) */}
+        {/* Main Onboarding / Getting Started static banner */}
         {!loading && history.length === 0 && !scanResult && (
           <div className="rc-card" style={{ marginBottom: 24, borderLeft: '4px solid var(--accent)' }}>
             <div className="rc-card-hdr">
