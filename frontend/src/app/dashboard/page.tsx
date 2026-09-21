@@ -279,41 +279,29 @@ export default function DashboardPage() {
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg-base)' }}>
       <Sidebar />
-      <Joyride
-        onEvent={handleJoyrideCallback}
-        continuous
-        run={runTour}
-        scrollToFirstStep
-        steps={tourSteps}
-        options={{
-          zIndex: 10000,
-          primaryColor: '#ea580c',
-          backgroundColor: 'var(--bg-card)',
-          textColor: 'var(--text-primary)',
-          overlayColor: 'rgba(0, 0, 0, 0.75)',
-          arrowColor: 'var(--bg-card)',
-          showProgress: true,
-          buttons: ['back', 'primary', 'skip']
-        }}
-        styles={{
-          tooltipContainer: {
-            textAlign: 'left',
-          },
-          buttonPrimary: {
-            backgroundColor: 'var(--accent)',
-            fontSize: '0.85rem',
-            borderRadius: 6,
-          },
-          buttonBack: {
-            color: 'var(--text-secondary)',
-            marginRight: 10,
-          },
-          buttonSkip: {
-            color: 'var(--text-muted)',
-          }
-        }}
-      />
       <main className="rc-main" style={{ position: 'relative' }}>
+        <Joyride
+          onEvent={handleJoyrideCallback}
+          continuous
+          run={runTour}
+          scrollToFirstStep
+          steps={tourSteps}
+          options={{
+            zIndex: 10000,
+            primaryColor: '#ea580c',
+            backgroundColor: 'var(--bg-card)',
+            textColor: 'var(--text-primary)',
+            overlayColor: 'rgba(0, 0, 0, 0.75)',
+            arrowColor: 'var(--bg-card)',
+            showProgress: true,
+          }}
+          styles={{
+            tooltipContainer: { textAlign: 'left' },
+            buttonPrimary: { backgroundColor: 'var(--accent)', fontSize: '0.85rem', borderRadius: 6 },
+            buttonBack: { color: 'var(--text-secondary)', marginRight: 10 },
+            buttonSkip: { color: 'var(--text-muted)' },
+          }}
+        />
         {/* Page Header */}
         <div className="rc-page-hdr">
           <div>
@@ -631,12 +619,11 @@ export default function DashboardPage() {
                 <th>AI Gate</th>
                 <th>Sandbox</th>
                 <th>Patch</th>
-                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {history.length === 0 ? (
-                <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>No scan records yet. Trigger a scan above.</td></tr>
+                <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>No scan records yet. Trigger a scan above.</td></tr>
               ) : history.map((s) => (
                 <tr key={s.id} style={{ cursor: 'pointer' }} onClick={() => { setScanResult(s); setPatchToast(null); window.scrollTo({ top: 0, behavior: 'smooth' }); }} title="Click to view this scan report">
                   <td style={{ color: 'var(--text-primary)', fontSize: '0.8rem', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -653,40 +640,6 @@ export default function DashboardPage() {
                   <td style={{ fontSize: '0.72rem', fontWeight: 700,
                     color: s.patch_status === 'APPLIED' ? 'var(--green)' : s.patch_status === 'REJECTED' ? 'var(--red)' : s.patch_status === 'PENDING' ? 'var(--accent)' : 'var(--text-muted)'
                   }}>{s.patch_status || 'N/A'}</td>
-                  <td onClick={e => e.stopPropagation()}>
-                    {s.patch_status === 'PENDING' && s.patched_code ? (
-                      <div style={{ display: 'flex', gap: 6, flexWrap: 'nowrap' }}>
-                        <button
-                          disabled={patchLoading}
-                          onClick={() => handleApprove(s.id, false)}
-                          title="Create GitHub Pull Request"
-                          style={{
-                            background: 'rgba(20,209,120,0.12)', border: '1px solid rgba(20,209,120,0.35)',
-                            color: 'var(--green)', borderRadius: 5, padding: '4px 10px',
-                            fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer',
-                            display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap',
-                          }}
-                        >
-                          <CheckCircle2 size={12} /> Approve
-                        </button>
-                        <button
-                          disabled={patchLoading}
-                          onClick={() => handleReject(s.id)}
-                          title="Reject this patch"
-                          style={{
-                            background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)',
-                            color: 'var(--red)', borderRadius: 5, padding: '4px 10px',
-                            fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer',
-                            display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap',
-                          }}
-                        >
-                          <X size={12} /> Reject
-                        </button>
-                      </div>
-                    ) : (
-                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>—</span>
-                    )}
-                  </td>
                 </tr>
               ))}
             </tbody>
