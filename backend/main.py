@@ -579,33 +579,10 @@ async def run_scan(req: ScanRequest, db: Session = Depends(get_db),
         db.commit()
         db.refresh(result)
         
-        # Auto-create Pull Request if a patch was generated
-        if result.patched_code:
-            github_token = settings.GITHUB_TOKEN
-            if github_token:
-                try:
-                    from backend.github_utils import create_github_pr
-                    pr_url, target_branch = create_github_pr(
-                        github_token=github_token,
-                        repo_url=repo_url,
-                        base_branch=branch,
-                        branch_name=f"resiliocheck-fix-{result.id}",
-                        patched_file=patched_filename,
-                        patched_code=patched_code,
-                        scan_id=result.id,
-                        gate=result.gate,
-                        gate_rationale=result.gate_rationale,
-                        explanation=result.explanation,
-                        critical_count=result.critical_count,
-                        high_count=result.high_count,
-                        tag_user=None,
-                        direct=False
-                    )
-                    result.patch_status = "APPLIED"
-                    db.commit()
-                    log.info("Auto-created PR for scan #%s: %s", result.id, pr_url)
-                except Exception as e:
-                    log.error("Failed to auto-create PR for scan #%s: %s", result.id, e)
+        # NOTE: Auto-PR was removed — it used the platform bot token to open PRs
+        # on any repo a user scanned, with no user consent (security/spam risk).
+        # Users can still approve patches via the dashboard "Approve & Create PR" button,
+        # which uses their own OAuth token. See: POST /api/scans/{id}/apply-patch
 
         payload = _scan_to_dict(result)
         payload["sandbox_logs"] = outcome.get("sandbox_logs", "")

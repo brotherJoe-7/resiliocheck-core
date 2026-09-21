@@ -53,11 +53,14 @@ def groq_err(status: int, message: str, headers: dict | None = None) -> FakeResp
 @pytest.fixture(scope="session")
 def app():
     if _TEST_DB.exists():
-        _TEST_DB.unlink()
+        _TEST_DB.unlink(missing_ok=True)
     from backend.main import app as _app
     yield _app
-    if _TEST_DB.exists():
+    try:
         _TEST_DB.unlink()
+    except (PermissionError, FileNotFoundError):
+        pass
+
 
 
 @pytest.fixture()

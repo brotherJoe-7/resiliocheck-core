@@ -147,12 +147,13 @@ class GroqClient:
     request_timeout: float = field(default_factory=lambda: float(settings.LLM_REQUEST_TIMEOUT_SECONDS))
     tpm_budget: int = field(default_factory=lambda: settings.LLM_TPM_BUDGET)
     post: Callable[..., requests.Response] | None = field(default=None, repr=False)
-    sleep: Callable[[float], None] | None = field(default_factory=lambda: __import__('time').sleep, repr=False)
+    sleep: Callable[[float], None] | None = field(default_factory=lambda: time.sleep, repr=False)
 
     waited: float = 0.0
     calls: int = 0
     last_model: str = ""
     engine_label: str | None = None
+    dead_models: set = field(default_factory=set)  # persistent across calls
 
     def _get_route(self, task_type: str) -> dict:
         routes = {
@@ -168,7 +169,11 @@ class GroqClient:
     def chat(self, system: str, user: str = "", *, history: list[dict] | None = None,
              temperature: float = 0.0, max_tokens: int | None = None, json_mode: bool = False,
              task_type: str = "deep_scan") -> str:
-             
+
+        # Fail-fast: no Groq key configured at all
+        if not self.api_key:
+            raise GroqAuthError("Groq API key not configured. Set GROQ_API_KEY in your environment.")
+
         max_tokens = max_tokens or settings.LLM_MAX_OUTPUT_TOKENS
         
         prompt_tokens = estimate_tokens(system)
@@ -199,6 +204,8 @@ class GroqClient:
         if self.engine_label:
             if "DeepSeek" in self.engine_label:
                 primary_provider, primary_model = "deepseek", settings.DEEPSEEK_MODEL
+            elif "120B" in self.engine_label:
+                primary_provider, primary_model = "groq", "openai/gpt-oss-120b"
             elif "20B" in self.engine_label:
                 primary_provider, primary_model = "groq", "openai/gpt-oss-20b"
             else:
@@ -214,19 +221,24 @@ class GroqClient:
 
         attempts = [{"provider": primary_provider, "model": primary_model}] + fallback_chain
         errors = []
-        
-        # Track models we've tried and exhausted
-        dead_models = set()
+
+        # Track models we've tried and exhausted (uses persistent self.dead_models)
+        _saw_rate_limit = False  # tracks whether any 429 caused us to exhaust the budget
+        _json_mode_active = json_mode  # may be toggled off for unsupported models
 
         while True:
             for attempt in attempts:
                 provider = attempt["provider"]
                 model = attempt["model"]
-                
-                if model in dead_models:
+
+                if model in self.dead_models:
                     continue
-                
+
                 payload["model"] = model
+                if _json_mode_active:
+                    payload["response_format"] = {"type": "json_object"}
+                elif "response_format" in payload:
+                    del payload["response_format"]
                 ak = self.api_key if provider == "groq" else self.deepseek_api_key
                 base_url = settings.GROQ_URL.replace("/chat/completions", "") if provider == "groq" else "https://api.deepseek.com"
                 url = f"{base_url.rstrip('/')}/chat/completions"
@@ -260,8 +272,8 @@ class GroqClient:
                 lowered = err_msg.lower()
 
                 if status in (401, 403):
-                    log.error("[%s] Auth error: %s", provider, err_msg)
-                    continue
+                    log.error("[%s] Auth error on %s: %s", provider, model, err_msg)
+                    raise GroqAuthError(f"Authentication failed for {provider} ({status}): {err_msg}")
 
                 if status == 429:
                     wait = _parse_retry_after(resp)
@@ -277,9 +289,21 @@ class GroqClient:
                         log.warning("[%s] %s rate-limited (retry-after≈%.1fs): sleeping...", provider, model, wait)
                         self.sleep(wait)
                         self.waited += wait
-                        break # break out of 'for attempt in attempts' to retry the while True loop
-                        
+                        break  # break out of 'for attempt in attempts' to retry the while True loop
+
+                    # Budget exhausted by this 429 — skip to next model but record it
+                    _saw_rate_limit = True
                     log.warning("[%s] %s rate-limited (wait %.1fs > budget %.1fs), skipping...", provider, model, wait, self.max_total_wait - self.waited)
+                    continue
+
+                if status == 400 and any(h in lowered for h in _JSON_MODE_FAIL_HINTS):
+                    if _json_mode_active:
+                        log.warning("[%s] %s does not support json_mode; retrying without it", provider, model)
+                        _json_mode_active = False
+                        break  # retry same model without json_mode
+                    # json_mode already off — treat as model-gone
+                    log.warning("[%s] %s permanently failed json: %s", provider, model, err_msg)
+                    self.dead_models.add(model)
                     continue
 
                 if status in (500, 502, 503, 504):
@@ -288,11 +312,21 @@ class GroqClient:
 
                 if status == 413 or (status == 400 and any(h in lowered for h in _TOO_LARGE_HINTS)):
                     raise GroqPayloadTooLarge(f"{provider} {status}: {err_msg}")
-                    
+
+                # Decommissioned / unknown model — skip permanently
+                if status in (404, 400) and any(h in lowered for h in _MODEL_GONE_HINTS):
+                    log.warning("[%s] model %s gone (%s): %s", provider, model, status, err_msg)
+                    self.dead_models.add(model)
+                    continue
+
                 log.warning("[%s] unexpected error %s on %s: %s", provider, status, model, err_msg)
-                
-            # If we didn't break out of the attempts loop to retry, then all attempts failed
+            # All attempts in the chain failed — raise the most informative error
             else:
+                if _saw_rate_limit:
+                    raise GroqRateLimitError(
+                        f"All models are rate limited and the retry budget ({self.max_total_wait}s) is exhausted. "
+                        f"Please wait and try again. Errors: {' | '.join(errors)}"
+                    )
                 raise GroqModelUnavailable(f"All models in fallback chain failed. Errors: {' | '.join(errors)}")
 
     @staticmethod

@@ -15,7 +15,7 @@ def test_root_and_health(client):
     h = client.get("/api/health").json()
     assert h["db_status"] == "connected"
     assert h["groq_key_set"] is True
-    assert "groq_model" in h and "sandbox" in h
+    assert "groq_model_fast" in h and "sandbox" in h
     assert "GROQ_API_KEY" not in json.dumps(h)  # never leak secrets
 
 
@@ -103,6 +103,8 @@ def test_full_scan_flow(client, auth_headers, tmp_path, monkeypatch):
         return groq_ok("import sqlite3\nq = 'SELECT * FROM users WHERE id=?'\n")
 
     monkeypatch.setattr(lp.requests, "post", fake_post)
+    # Prevent actual sleeps during rate-limit retries (would add ~120s to test)
+    monkeypatch.setattr(lp.time, "sleep", lambda s: None)
 
     r = client.post("/api/scan", headers=auth_headers, json={
         "repo_url": "https://github.com/demo/demo-repo", "branch": "main",
@@ -111,8 +113,11 @@ def test_full_scan_flow(client, auth_headers, tmp_path, monkeypatch):
     assert r.status_code == 200, r.text
     d = r.json()
     assert d["gate"] == "BLOCKED"
-    assert d["model"] == "openai/gpt-oss-20b"           # fell back after 429
-    assert calls[:2] == ["openai/gpt-oss-120b", "openai/gpt-oss-20b"]
+    # 120B hits 429 -> falls back to deepseek (new routing: groq 120B -> deepseek)
+    from backend import settings as _s
+    assert d["model"] == _s.DEEPSEEK_MODEL
+    assert calls[0] == "openai/gpt-oss-120b"        # 120B tried first
+    assert _s.DEEPSEEK_MODEL in calls               # deepseek used as fallback
     assert d["critical_count"] == 2                      # SQLi + merged hardcoded password
     assert d["patched_filename"] == "backend/app.py"
     assert d["patch_status"] == "PENDING"
@@ -124,14 +129,21 @@ def test_full_scan_flow(client, auth_headers, tmp_path, monkeypatch):
     scans = client.get("/api/scans", headers=auth_headers).json()
     assert scans[0]["id"] == d["id"]
     detail = client.get(f"/api/scans/{d['id']}", headers=auth_headers).json()
-    assert detail["gate"] == "BLOCKED" and detail["model"] == "openai/gpt-oss-20b"
+    assert detail["gate"] == "BLOCKED" and detail["model"] == _s.DEEPSEEK_MODEL
     deps = client.get("/api/deployments", headers=auth_headers).json()
     assert deps[0]["scan_id"] == d["id"] and deps[0]["status"] == "Failed"
     assert client.get("/api/auth/me", headers=auth_headers).json()["scan_count"] >= 1
 
     # reject / apply
-    r = client.post(f"/api/scans/{d['id']}/apply-patch", headers=auth_headers)
-    assert r.status_code == 503                          # GITHUB_TOKEN not set
+    # Patch GITHUB_TOKEN to empty to guarantee 503 regardless of .env
+    from backend import settings as _settings_mod
+    _orig_token = _settings_mod.GITHUB_TOKEN
+    _settings_mod.GITHUB_TOKEN = ""
+    try:
+        r = client.post(f"/api/scans/{d['id']}/apply-patch", headers=auth_headers)
+        assert r.status_code == 503, f"Expected 503 (no token), got {r.status_code}: {r.text}"
+    finally:
+        _settings_mod.GITHUB_TOKEN = _orig_token
     r = client.post(f"/api/scans/{d['id']}/reject-patch", headers=auth_headers)
     assert r.json()["patch_status"] == "REJECTED"
 

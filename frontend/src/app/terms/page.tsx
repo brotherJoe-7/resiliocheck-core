@@ -30,7 +30,7 @@ export default function TermsPage() {
         <section style={{ marginBottom: 40 }}>
           <h2 style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: 16 }}>3. No Liability for Undetected Vulnerabilities</h2>
           <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7 }}>
-            <strong>Our service is provided on an "as is" and "as available" basis.</strong> While we strive for high accuracy, automated security scanning and AI analysis are not perfect and cannot guarantee the discovery of all vulnerabilities. 
+            <strong>Our service is provided on an &ldquo;as is&rdquo; and &ldquo;as available&rdquo; basis.</strong> While we strive for high accuracy, automated security scanning and AI analysis are not perfect and cannot guarantee the discovery of all vulnerabilities.
           </p>
           <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7, marginTop: 12 }}>
             You acknowledge and agree that ResilioCheck AI shall not be held liable for any security breaches, data losses, or damages resulting from vulnerabilities that our platform failed to detect or report. Our tool should be used as a supplementary layer of security, not a replacement for comprehensive manual security audits and standard security practices.

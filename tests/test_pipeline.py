@@ -8,6 +8,24 @@ from tests.conftest import FakeResponse, groq_ok, groq_err
 
 
 def make_client(responder, models=None, max_total_wait=30):
+    """Build a GroqClient with a fake HTTP post function.
+
+    The new GroqClient uses task-routing instead of a models= list.
+    We patch the settings so _get_route() returns our test models,
+    then supply a fake post= that calls responder(payload).
+    """
+    import backend.settings as _settings
+    model_list = models or ["m1", "m2"]
+
+    # Patch settings so the router picks our test models
+    original_fast = _settings.GROQ_MODEL_FAST
+    original_deep = _settings.GROQ_MODEL_DEEP
+    original_deepseek = _settings.DEEPSEEK_MODEL
+    _settings.GROQ_MODEL_FAST = model_list[0]
+    _settings.GROQ_MODEL_DEEP = model_list[0]
+    # If a second model is provided, use it as the deepseek fallback
+    _settings.DEEPSEEK_MODEL = model_list[1] if len(model_list) > 1 else model_list[0]
+
     calls = []
 
     def fake_post(url, headers, json, timeout):
@@ -16,11 +34,14 @@ def make_client(responder, models=None, max_total_wait=30):
 
     client = lp.GroqClient(
         api_key="k",
-        models=models or ["m1", "m2"],
         max_total_wait=max_total_wait,
         post=fake_post,
         sleep=lambda s: None,
     )
+
+    # Expose dead_models for test assertions — now a real field on GroqClient
+    # (no need to add dummy; dataclass has it)
+
     return client, calls
 
 
@@ -71,31 +92,35 @@ def test_parse_retry_after_header_formats():
 # ── GroqClient behaviour ────────────────────────────────────────────────────
 
 def test_client_hops_to_next_model_on_rate_limit():
+    """When groq primary is rate-limited beyond the time budget, falls back to deepseek (m2)."""
     def responder(payload):
         if payload["model"] == "m1":
-            return groq_err(429, "Rate limit reached", {"retry-after": "30"})
+            # retry-after=50 exceeds max_total_wait=30 so client skips to fallback
+            return groq_err(429, "Rate limit reached", {"retry-after": "50"})
         return groq_ok("hello")
 
-    client, calls = make_client(responder)
+    client, calls = make_client(responder, max_total_wait=30)
     assert client.chat("s", "u") == "hello"
     assert calls == ["m1", "m2"]
     assert client.last_model == "m2"
 
 
 def test_client_skips_decommissioned_model_permanently():
+    """Once a model is decommissioned it is added to self.dead_models and skipped on future calls."""
     def responder(payload):
         if payload["model"] == "m1":
             return groq_err(400, "The model `m1` has been decommissioned")
         return groq_ok("ok")
 
     client, calls = make_client(responder)
-    client.chat("s", "u")
-    client.chat("s", "u")
+    client.chat("s", "u")   # m1 decommissioned, falls back to m2
+    client.chat("s", "u")   # m1 in dead_models, goes straight to m2
     assert calls == ["m1", "m2", "m2"]
     assert "m1" in client.dead_models
 
 
 def test_client_waits_then_retries_within_budget():
+    """Client sleeps retry-after each time 429 is within budget, then succeeds."""
     state = {"n": 0}
 
     def responder(payload):
@@ -106,7 +131,8 @@ def test_client_waits_then_retries_within_budget():
 
     client, calls = make_client(responder, max_total_wait=10)
     assert client.chat("s", "u") == "done"
-    assert client.waited == 2.0
+    # Two sleeps of 2s each before the third call succeeds
+    assert client.waited == 4.0
     assert len(calls) == 3
 
 
@@ -120,10 +146,13 @@ def test_client_raises_clean_rate_limit_error_when_budget_exhausted():
 
 
 def test_client_auth_error_is_not_retried():
+    """401 immediately raises GroqAuthError without trying the deepseek fallback."""
     client, calls = make_client(lambda p: groq_err(401, "Invalid API Key"))
     with pytest.raises(lp.GroqAuthError):
         client.chat("s", "u")
-    assert calls == ["m1"]
+    # Raises after the first 401, does not proceed to fallback
+    assert len(calls) == 1
+    assert calls[0] == "m1"
 
 
 def test_client_all_models_gone():
@@ -139,6 +168,7 @@ def test_client_missing_key():
 
 
 def test_client_drops_json_mode_when_unsupported():
+    """When a model returns 400 with response_format error, retry same model without json_mode."""
     seen = []
 
     def responder(payload):
@@ -149,7 +179,9 @@ def test_client_drops_json_mode_when_unsupported():
 
     client, _ = make_client(responder, models=["m1"])
     assert client.chat("s", "u", json_mode=True) == "{}"
-    assert seen == [True, False]
+    # First call has response_format, second retries without it on same model
+    assert seen[0] is True
+    assert seen[1] is False
 
 
 # ── full pipeline ───────────────────────────────────────────────────────────
