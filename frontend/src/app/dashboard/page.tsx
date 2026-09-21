@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Sidebar from '../components/Sidebar';
 import ChatPanel from '../components/ChatPanel';
 import { Zap, Check, AlertTriangle, Hourglass, LayoutGrid, X, CheckCircle2, Sparkles } from 'lucide-react';
-import { Joyride, Step, STATUS } from 'react-joyride';
+import { Joyride, STATUS } from 'react-joyride';
 
 import type { ScanResult } from '@/app/types';
 
@@ -84,7 +84,8 @@ export default function DashboardPage() {
 
   // Joyride Onboarding Tour State
   const [runTour, setRunTour] = useState(false);
-  const tourSteps: Step[] = [
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tourSteps: any[] = [
     {
       target: '#tour-repo-input',
       content: 'Welcome! First, paste the link to your GitHub repository here. The AI will securely download and analyze the code instantly.',
