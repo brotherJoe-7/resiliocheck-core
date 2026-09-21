@@ -1,6 +1,6 @@
 'use client';
 import Sidebar from '../../components/Sidebar';
-import { BookOpen, Code, Terminal, Server, Shield, Zap, RefreshCw, Key } from 'lucide-react';
+import { BookOpen, Code, Terminal, Shield, Zap, RefreshCw, Key } from 'lucide-react';
 
 const sections = [
   { id: 'introduction', label: 'Introduction', icon: BookOpen },
@@ -94,7 +94,7 @@ export default function DashboardDocumentationPage() {
                 {/* 2. Run */}
                 <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '20px' }}>
                   <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 10, color: 'var(--text-primary)' }}>2. Run a Local Scan</h3>
-                  <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 12 }}>Scan any local directory. By default, it will scan the entire project folder comprehensively. The CLI will securely prompt you for your API keys via the command prompt if they aren't configured in your environment.</p>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 12 }}>Scan any local directory. By default, it will scan the entire project folder comprehensively. The CLI will securely prompt you for your API keys via the command prompt if they aren&apos;t configured in your environment.</p>
                   <div style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 6, padding: '12px 16px', fontFamily: 'monospace', fontSize: '0.85rem' }}>
                     <div style={{ color: 'var(--text-muted)', marginBottom: 6 }}># Deep scan the current directory</div>
                     <div style={{ color: 'var(--text-primary)', marginBottom: 12 }}>resiliocheck .</div>

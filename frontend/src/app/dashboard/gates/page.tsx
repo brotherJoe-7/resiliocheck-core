@@ -1,5 +1,5 @@
 'use client';
-import { apiJson, getApiBaseUrl } from '@/app/utils/apiClient';
+import { apiJson } from '@/app/utils/apiClient';
 import type { Gate, ScanResult } from '@/app/types';
 import { useState, useEffect } from 'react';
 import Sidebar from '../../components/Sidebar';
