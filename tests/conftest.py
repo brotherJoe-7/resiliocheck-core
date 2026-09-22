@@ -17,6 +17,8 @@ _TEST_DB = ROOT / "test_resiliocheck.db"
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{_TEST_DB}")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-for-pytest-only-0123456789abcdef")
 os.environ.setdefault("GROQ_API_KEY", "gsk_test_dummy_key")
+# The fallback provider must be configured for the Groq -> DeepSeek hop to be exercised.
+os.environ.setdefault("DEEPSEEK_API_KEY", "sk_test_dummy_deepseek_key")
 os.environ.setdefault("SANDBOX_ENABLED", "false")
 os.environ.setdefault("ENVIRONMENT", "test")
 

@@ -5,6 +5,7 @@ import Sidebar from '../components/Sidebar';
 import ChatPanel from '../components/ChatPanel';
 import { Zap, Check, AlertTriangle, Hourglass, LayoutGrid, X, CheckCircle2, Sparkles } from 'lucide-react';
 import { Joyride, STATUS } from 'react-joyride';
+import type { Step, EventData } from 'react-joyride';
 
 import type { ScanResult } from '@/app/types';
 
@@ -13,6 +14,47 @@ const ENGINE_OPTIONS = [
   'Groq GPT-OSS 20B Fast Static Analysis (SAST)',
   'DeepSeek V4.1 Flash (Fallback / Batch)',
 ];
+
+// Onboarding tour steps. react-joyride v3 renamed `disableBeacon` -> `skipBeacon`;
+// the old prop is silently ignored at runtime, so the beacon would still show.
+// Declared at module scope so the array identity is stable across renders.
+const TOUR_STEPS: Step[] = [
+  {
+    target: '#tour-repo-input',
+    content: 'Welcome! First, paste the link to your GitHub repository here. The AI will securely download and analyze the code instantly.',
+    skipBeacon: true,
+    placement: 'bottom',
+  },
+  {
+    target: '#tour-engine-select',
+    content: 'Next, select your AI Engine. The Deep Analysis model is incredibly thorough, while Fast Static Analysis is built for speed.',
+    skipBeacon: true,
+  },
+  {
+    target: '#tour-scan-button',
+    content: 'Click here to INITIATE SCAN. Our specialized agents will hunt for vulnerabilities across your codebase.',
+    skipBeacon: true,
+  },
+  {
+    target: '#tour-nav-agents',
+    content: 'View your Autonomous Agents here. These specialized models handle specific security disciplines.',
+    skipBeacon: true,
+    placement: 'right',
+  },
+  {
+    target: '#tour-nav-security-gates',
+    content: 'Check the Security Gates section to configure pipeline blocking rules.',
+    skipBeacon: true,
+    placement: 'right',
+  },
+  {
+    target: '#tour-history-panel',
+    content: 'Once the scan completes, your intelligent vulnerability report and AI-generated fixes will appear right here!',
+    skipBeacon: true,
+  },
+];
+
+const TOUR_DONE_KEY = 'rc_tour_completed';
 
 function errorMessage(e: unknown, fallback: string): string {
   if (e instanceof ApiError) return e.message;
@@ -84,55 +126,18 @@ export default function DashboardPage() {
 
   // Joyride Onboarding Tour State
   const [runTour, setRunTour] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const tourSteps: any[] = [
-    {
-      target: '#tour-repo-input',
-      content: 'Welcome! First, paste the link to your GitHub repository here. The AI will securely download and analyze the code instantly.',
-      disableBeacon: true,
-      placement: 'bottom',
-    },
-    {
-      target: '#tour-engine-select',
-      content: 'Next, select your AI Engine. The Deep Analysis model is incredibly thorough, while Fast Static Analysis is built for speed.',
-      disableBeacon: true,
-    },
-    {
-      target: '#tour-scan-button',
-      content: 'Click here to INITIATE SCAN. Our specialized agents will hunt for vulnerabilities across your codebase.',
-      disableBeacon: true,
-    },
-    {
-      target: '#tour-nav-agents',
-      content: 'View your Autonomous Agents here. These specialized models handle specific security disciplines.',
-      disableBeacon: true,
-      placement: 'right',
-    },
-    {
-      target: '#tour-nav-security-gates',
-      content: 'Check the Security Gates section to configure pipeline blocking rules.',
-      disableBeacon: true,
-      placement: 'right',
-    },
-    {
-      target: '#tour-history-panel',
-      content: 'Once the scan completes, your intelligent vulnerability report and AI-generated fixes will appear right here!',
-      disableBeacon: true,
-    }
-  ];
 
-  const handleJoyrideCallback = useCallback((data: any) => {
-    const { status } = data;
-    if (([STATUS.FINISHED, STATUS.SKIPPED] as string[]).includes(status)) {
+  const handleJoyrideEvent = useCallback((data: EventData) => {
+    if (data.status === STATUS.FINISHED || data.status === STATUS.SKIPPED) {
       setRunTour(false);
-      localStorage.setItem('rc_tour_completed', 'true');
+      localStorage.setItem(TOUR_DONE_KEY, 'true');
     }
   }, []);
 
   // Automatically start tour if history is 0 after loading
   useEffect(() => {
     if (!loading && history.length === 0 && !scanResult && !historyError) {
-      if (localStorage.getItem('rc_tour_completed') === 'true') return;
+      if (localStorage.getItem(TOUR_DONE_KEY) === 'true') return;
       const timer = setTimeout(() => {
         setRunTour(true);
       }, 800); // slightly longer delay to ensure DOM is ready
@@ -144,18 +149,19 @@ export default function DashboardPage() {
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 60_000);
     
-    // Check URL parameters for OAuth return
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      const oauth = params.get('github_oauth');
-      if (oauth === 'success') {
-        setPatchToast({ type: 'success', msg: 'Successfully connected GitHub account!' });
-        window.history.replaceState({}, document.title, window.location.pathname);
-      } else if (oauth === 'error') {
-        const reason = params.get('reason') || 'Unknown error';
-        setPatchToast({ type: 'error', msg: `GitHub connection failed: ${reason}` });
-        window.history.replaceState({}, document.title, window.location.pathname);
-      }
+    // Check URL parameters for OAuth return. The toast update is deferred to
+    // the next tick so setState does not run synchronously in the effect body
+    // (react-hooks/set-state-in-effect).
+    const params = new URLSearchParams(window.location.search);
+    const oauth = params.get('github_oauth');
+    if (oauth === 'success' || oauth === 'error') {
+      const reason = params.get('reason') || 'Unknown error';
+      const toast = oauth === 'success'
+        ? { type: 'success' as const, msg: 'Successfully connected GitHub account!' }
+        : { type: 'error' as const, msg: `GitHub connection failed: ${reason}` };
+      window.history.replaceState({}, document.title, window.location.pathname);
+      const t = setTimeout(() => setPatchToast(toast), 0);
+      return () => { clearInterval(id); clearTimeout(t); };
     }
 
     return () => clearInterval(id);
@@ -281,11 +287,11 @@ export default function DashboardPage() {
       <Sidebar />
       <main className="rc-main" style={{ position: 'relative' }}>
         <Joyride
-          onEvent={handleJoyrideCallback}
+          onEvent={handleJoyrideEvent}
           continuous
           run={runTour}
           scrollToFirstStep
-          steps={tourSteps}
+          steps={TOUR_STEPS}
           options={{
             zIndex: 10000,
             primaryColor: '#ea580c',
@@ -388,7 +394,7 @@ export default function DashboardPage() {
                       try {
                         const data = await apiJson<{ url: string }>('/api/auth/github/oauth-url');
                         window.location.href = data.url;
-                      } catch (e) {
+                      } catch {
                         setError('Could not initiate GitHub login. Please try again.');
                       }
                     }} 

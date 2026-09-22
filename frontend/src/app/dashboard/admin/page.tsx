@@ -42,7 +42,10 @@ export default function AdminPage() {
     if (authLoading) return;
     if (!user) { router.push('/login'); return; }
     if (user.role !== 'superadmin' && user.role !== 'admin') { router.push('/dashboard'); return; }
-    loadAll();
+    // Schedule the initial fetch on the next tick so state updates do not run
+    // synchronously inside the effect body (react-hooks/set-state-in-effect).
+    const t = setTimeout(() => { void loadAll(); }, 0);
+    return () => clearTimeout(t);
   }, [user, authLoading, router, loadAll]);
 
   async function updateRole(userId: number, newRole: string) {

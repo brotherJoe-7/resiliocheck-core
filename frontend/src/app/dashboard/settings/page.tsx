@@ -180,7 +180,7 @@ export default function SettingsPage() {
                             if (!res.ok) throw new Error("Failed to disconnect");
                             setGithubConnected(false);
                             setMessage("GitHub account disconnected.");
-                          } catch (e) {
+                          } catch {
                             setMessage("Error disconnecting GitHub.");
                           }
                         }}

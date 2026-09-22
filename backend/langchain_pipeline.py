@@ -147,7 +147,10 @@ class GroqClient:
     request_timeout: float = field(default_factory=lambda: float(settings.LLM_REQUEST_TIMEOUT_SECONDS))
     tpm_budget: int = field(default_factory=lambda: settings.LLM_TPM_BUDGET)
     post: Callable[..., requests.Response] | None = field(default=None, repr=False)
-    sleep: Callable[[float], None] | None = field(default_factory=lambda: time.sleep, repr=False)
+    # Resolved lazily so ``monkeypatch.setattr(time, "sleep", ...)`` in tests
+    # (and any runtime patching) is honoured instead of the function object
+    # captured at class-definition time.
+    sleep: Callable[[float], None] | None = field(default=None, repr=False)
 
     waited: float = 0.0
     calls: int = 0
@@ -279,15 +282,15 @@ class GroqClient:
                     wait = _parse_retry_after(resp)
                     if "per day" in lowered or "tpd" in lowered or "rpd" in lowered or wait > 600:
                         log.warning("[%s] daily quota exhausted on %s; skipping model", provider, model)
-                        dead_models.add(model)
+                        self.dead_models.add(model)
                         continue
                     if ("too large" in lowered or "tokens per minute" in lowered) and "request" in lowered:
                         raise GroqPayloadTooLarge(f"{provider} 429: {err_msg}")
                         
                     # Standard rate limit: sleep and retry if budget allows
-                    if self.sleep and self.waited + wait <= self.max_total_wait:
+                    if self.waited + wait <= self.max_total_wait:
                         log.warning("[%s] %s rate-limited (retry-after≈%.1fs): sleeping...", provider, model, wait)
-                        self.sleep(wait)
+                        (self.sleep or time.sleep)(wait)
                         self.waited += wait
                         break  # break out of 'for attempt in attempts' to retry the while True loop
 

@@ -34,6 +34,7 @@ def make_client(responder, models=None, max_total_wait=30):
 
     client = lp.GroqClient(
         api_key="k",
+        deepseek_api_key="dk",   # fallback provider must be configured for m2 to be tried
         max_total_wait=max_total_wait,
         post=fake_post,
         sleep=lambda s: None,
