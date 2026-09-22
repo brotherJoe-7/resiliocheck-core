@@ -101,6 +101,14 @@ app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(webhook.router)
 
+# ── CORS ─────────────────────────────────────────────────────────────────────
+# Explicit origins come from FRONTEND_URL (comma-separated). Local dev origins
+# are always appended. In addition, every Vercel deployment of the dashboard
+# (production alias *and* per-branch/per-commit preview URLs such as
+# https://resiliocheck-git-main-user.vercel.app) is allowed via a regex, since
+# those hostnames cannot be enumerated ahead of time. The regex is anchored to
+# `https://*.vercel.app` only — it deliberately does NOT allow arbitrary
+# run.app / e2b.dev hosts. Override with CORS_ALLOW_ORIGIN_REGEX if needed.
 _raw_origins = settings.FRONTEND_URL
 _allowed_origins = [o.strip().rstrip("/") for o in _raw_origins.split(",") if o.strip()]
 for _local in ("http://localhost:3000", "http://127.0.0.1:3000"):
@@ -110,6 +118,7 @@ for _local in ("http://localhost:3000", "http://127.0.0.1:3000"):
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
+    allow_origin_regex=settings.CORS_ALLOW_ORIGIN_REGEX or None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

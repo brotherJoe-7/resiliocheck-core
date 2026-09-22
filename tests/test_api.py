@@ -19,6 +19,48 @@ def test_root_and_health(client):
     assert "GROQ_API_KEY" not in json.dumps(h)  # never leak secrets
 
 
+@pytest.mark.parametrize("origin", [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://resiliocheck.vercel.app",                       # production alias
+    "https://resiliocheck-git-main-user.vercel.app",         # branch preview
+    "https://resiliocheck-abc123def-user-team.vercel.app",   # commit preview
+])
+def test_cors_allows_dashboard_origins(client, origin):
+    """
+    Regression: the browser reported "Cannot reach the ResilioCheck API
+    (Failed to fetch)" on login because the Vercel origin was rejected at the
+    CORS preflight stage. Every dashboard origin must pass the preflight.
+    """
+    r = client.options(
+        "/api/auth/login",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+    assert r.status_code == 200, (origin, r.text)
+    assert r.headers.get("access-control-allow-origin") == origin
+
+
+@pytest.mark.parametrize("origin", [
+    "https://evil.com",
+    "https://vercel.app.evil.com",          # suffix spoof
+    "https://notvercel.app",                # missing dot before vercel
+    "http://resiliocheck.vercel.app",       # plain http is not allowed
+    "https://anything.run.app",             # other hosts are not blanket-allowed
+    "https://anything.e2b.dev",
+])
+def test_cors_rejects_foreign_origins(client, origin):
+    r = client.options(
+        "/api/auth/login",
+        headers={"Origin": origin, "Access-Control-Request-Method": "POST"},
+    )
+    assert r.status_code == 400, (origin, r.text)
+    assert "access-control-allow-origin" not in r.headers
+
+
 def test_protected_routes_require_auth(client):
     for path in ("/api/scans", "/api/gates", "/api/agents", "/api/deployments", "/api/settings"):
         r = client.get(path)
