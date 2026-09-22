@@ -319,8 +319,12 @@ All `/api/*` routes except `/api/health` and `/api/auth/*` require `Authorizatio
 | `GET` | `/api/agents` · `POST /api/agents/{id}/toggle` | Autonomous agents |
 | `GET` | `/api/deployments` | Deployments derived from the 10 latest scans |
 | `GET` / `POST` | `/api/settings` | Workspace prefs, plan, team (roster visible to admins only) |
-| `GET` | `/api/admin/users` · `/stats` · `/audit-logs` | Admin / superadmin only |
-| `POST` | `/api/admin/users/{id}/role` · `DELETE /api/admin/users/{id}` | Superadmin only, audited |
+| `GET` | `/api/admin/users` | All registered users — admin+ only |
+| `GET` | `/api/admin/stats` | Platform-wide stats (total users, scans, blocked, admins) — admin+ |
+| `GET` | `/api/admin/audit-logs` | Full activity log (last 100 events) — **superadmin only** |
+| `POST` | `/api/admin/users/{id}/role` | Change a user's role — superadmin only, audited |
+| `DELETE` | `/api/admin/users/{id}` | Deactivate a user account — superadmin only, audited |
+| `POST` | `/api/admin/users/{id}/reactivate` | Re-enable a deactivated account — superadmin only, audited |
 
 ---
 
