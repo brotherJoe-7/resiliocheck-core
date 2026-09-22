@@ -102,6 +102,14 @@ ACCESS_TOKEN_EXPIRE_HOURS: int = _env_int("ACCESS_TOKEN_EXPIRE_HOURS", 168)  # 7
 # ── CORS ────────────────────────────────────────────────────────────────────
 FRONTEND_URL: str = _env("FRONTEND_URL", "http://localhost:3000")
 BACKEND_URL: str = _env("BACKEND_URL", "http://localhost:8000")
+# Regex matched against the Origin header in addition to FRONTEND_URL.
+# Default allows every Vercel deployment of the dashboard (production alias and
+# preview URLs). Set CORS_ALLOW_ORIGIN_REGEX=off to disable regex matching.
+_DEFAULT_CORS_REGEX = r"^https://[a-z0-9-]+(\.[a-z0-9-]+)*\.vercel\.app$"
+_cors_regex_raw = _env("CORS_ALLOW_ORIGIN_REGEX", _DEFAULT_CORS_REGEX)
+CORS_ALLOW_ORIGIN_REGEX: str = (
+    "" if _cors_regex_raw.lower() in ("off", "none", "disabled", "false", "0") else _cors_regex_raw
+)
 
 # ── Database ────────────────────────────────────────────────────────────────
 DATABASE_URL: str = _env("DATABASE_URL", "sqlite:///./resiliocheck.db")

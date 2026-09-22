@@ -150,7 +150,8 @@ All settings are read once in `backend/settings.py` from environment variables /
 | `JWT_SECRET_KEY` | *(ephemeral in dev)* | **Required when `ENVIRONMENT=production`.** `python -c "import secrets; print(secrets.token_hex(32))"` |
 | `ENVIRONMENT` | `development` | `production` enforces `JWT_SECRET_KEY` |
 | `DATABASE_URL` | `sqlite:///./resiliocheck.db` | Any SQLAlchemy URL; `postgres://` is rewritten to `postgresql://` |
-| `FRONTEND_URL` | `http://localhost:3000` | Comma-separated CORS origins (`*.vercel.app` is always allowed) |
+| `FRONTEND_URL` | `http://localhost:3000` | Comma-separated CORS origins; `localhost:3000` is always appended |
+| `CORS_ALLOW_ORIGIN_REGEX` | `^https://…\.vercel\.app$` | Regex for extra allowed origins — by default every Vercel production/preview deployment. Set to `off` to disable |
 | `GITHUB_TOKEN` | — | Bot PAT with `repo` scope; fallback for *Approve & Create PR* and webhook auto-setup when the user has not connected OAuth |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | — | GitHub OAuth App — enables *Connect GitHub* and private-repo scanning |
 | `GITHUB_WEBHOOK_SECRET` | — | HMAC secret used to verify `X-Hub-Signature-256` and to auto-register webhooks |
@@ -418,7 +419,7 @@ Set `NEXT_PUBLIC_API_URL` to the Cloud Run URL. `*.vercel.app` origins are alway
 | Webhook returns 401 | `GITHUB_WEBHOOK_SECRET` on the backend differs from the secret configured on the GitHub webhook. Re-add the monitored repo to re-register it. |
 | `Too many attempts` on login | Brute-force limiter (5/min/IP). Wait a minute. |
 | Dashboard keeps redirecting to `/login` | Backend restarted with an ephemeral dev JWT key. Set a fixed `JWT_SECRET_KEY`. |
-| CORS error in the browser | Add the frontend origin (no trailing slash) to `FRONTEND_URL`. |
+| `Cannot reach the ResilioCheck API (Failed to fetch)` on login / CORS error in the browser | The browser's CORS preflight was rejected (`Disallowed CORS origin`), so `fetch` fails before any response is received. `https://*.vercel.app` is allowed by default via `CORS_ALLOW_ORIGIN_REGEX`; for custom domains add the exact origin (no trailing slash) to `FRONTEND_URL` and redeploy the backend. Verify with `curl -i -X OPTIONS <API>/api/auth/login -H "Origin: <your-origin>" -H "Access-Control-Request-Method: POST"` — you should get `200` with `access-control-allow-origin`. |
 | `RuntimeError: JWT_SECRET_KEY is required in production` | Expected when `ENVIRONMENT=production` — set the secret. |
 
 ---
