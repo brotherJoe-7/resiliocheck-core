@@ -9,7 +9,7 @@ import bcrypt
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from backend import settings
 from backend.database import get_db
-from backend.models import User
+from backend.models import User, AuditLog
 from cryptography.fernet import Fernet
 
 log = logging.getLogger("resiliocheck.auth")
@@ -175,6 +175,14 @@ def register(req: RegisterRequest, db: Session = Depends(get_db), _: None = Depe
     db.add(user)
     db.commit()
     db.refresh(user)
+    log_entry = AuditLog(
+        admin_id=user.id,
+        admin_email=user.email,
+        action="USER_REGISTERED",
+        target=f"{user.email} (role={user.role})"
+    )
+    db.add(log_entry)
+    db.commit()
     token = create_access_token({"sub": user.email, "role": user.role})
     return {"access_token": token, "token_type": "bearer", "role": user.role, "email": user.email, "full_name": user.full_name}
 
@@ -192,6 +200,13 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db), _:
         log.warning("AUTH_FAILURE  ip=%s  email=%s  reason=account_inactive", client_ip, req.email.lower())
         raise HTTPException(status_code=403, detail="Account is deactivated")
     user.last_login = datetime.now(timezone.utc)
+    login_log = AuditLog(
+        admin_id=user.id,
+        admin_email=user.email,
+        action="LOGIN",
+        target=f"ip={client_ip}"
+    )
+    db.add(login_log)
     db.commit()
     log.info("AUTH_SUCCESS  ip=%s  email=%s  role=%s", client_ip, user.email, user.role)
     token = create_access_token({"sub": user.email, "role": user.role})

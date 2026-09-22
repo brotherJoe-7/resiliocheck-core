@@ -578,11 +578,25 @@ async def run_scan(req: ScanRequest, db: Session = Depends(get_db),
         current_user.last_scan_date = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).date()
         db.commit()
         db.refresh(result)
-        
-        # NOTE: Auto-PR was removed — it used the platform bot token to open PRs
-        # on any repo a user scanned, with no user consent (security/spam risk).
-        # Users can still approve patches via the dashboard "Approve & Create PR" button,
-        # which uses their own OAuth token. See: POST /api/scans/{id}/apply-patch
+
+        # Record scan activity in the audit log (visible to superadmins)
+        try:
+            scan_log = models.AuditLog(
+                admin_id=current_user.id,
+                admin_email=current_user.email,
+                action="SCAN_COMPLETED",
+                target=(
+                    f"{repo_url} (branch={branch}, gate={pipeline_result['gate']}, "
+                    f"critical={pipeline_result['critical_count']}, high={pipeline_result['high_count']})"
+                )
+            )
+            db.add(scan_log)
+            db.commit()
+        except Exception:  # non-fatal — don't let logging break the response
+            pass
+
+        # NOTE: Auto-PR was removed — users approve patches via the dashboard instead.
+        # See: POST /api/scans/{id}/apply-patch
 
         payload = _scan_to_dict(result)
         payload["sandbox_logs"] = outcome.get("sandbox_logs", "")

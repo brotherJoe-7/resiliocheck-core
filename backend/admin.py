@@ -87,6 +87,22 @@ def deactivate_user(user_id: int, db: Session = Depends(get_db), current: User =
     db.commit()
     return {"status": "deactivated", "user_id": user_id}
 
+@router.post("/users/{user_id}/reactivate")
+def reactivate_user(user_id: int, db: Session = Depends(get_db), current: User = Depends(require_superadmin)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.is_active = True
+    log = AuditLog(
+        admin_id=current.id,
+        admin_email=current.email,
+        action="USER_REACTIVATION",
+        target=user.email
+    )
+    db.add(log)
+    db.commit()
+    return {"status": "reactivated", "user_id": user_id}
+
 @router.get("/audit-logs")
 def get_audit_logs(db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
     logs = db.query(AuditLog).order_by(AuditLog.timestamp.desc()).limit(100).all()

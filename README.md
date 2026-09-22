@@ -30,6 +30,7 @@
 - [Security model](#-security-model)
 - [Troubleshooting](#-troubleshooting)
 - [Project layout](#-project-layout)
+- [Dissertation peer-testing guide](#-dissertation-peer-testing-guide)
 - [Roadmap](#-roadmap)
 
 ---
@@ -444,6 +445,98 @@ Set `NEXT_PUBLIC_API_URL` to the Cloud Run URL. `*.vercel.app` origins are alway
 ├── requirements.txt / requirements-dev.txt
 └── .env.example                annotated configuration template
 ```
+
+---
+
+## 🎓 Dissertation Peer-Testing Guide
+
+This section explains how to share ResilioCheck AI with colleagues for evaluation, collect evidence for your dissertation, and monitor tester activity — all from the **Super Admin Dashboard**.
+
+### 1. Share the live URL
+
+The production deployment is on Vercel. Share the URL with your testers — they register their own account at `/register`.
+
+> **Note:** The first account ever created automatically becomes `superadmin`. All subsequent registrations become `user` by default.
+
+### 2. Provision tester accounts (as superadmin)
+
+All account management is done from **Dashboard → Super Admin** (`/dashboard/admin`).
+
+| Task | How |
+|---|---|
+| View all registered testers | The **Registered Users** table lists every account, their last login time, and how many scans they have run |
+| Promote a tester to `admin` | Change the role dropdown next to their name — logged in the Activity Log |
+| Revoke access | Click **Revoke** — the tester's account is deactivated and they cannot log in |
+| Restore access | Click **Reactivate** to re-enable a deactivated account |
+
+### 3. Monitor tester activity (Activity Log)
+
+The **Activity Log** on the Super Admin page captures every significant event automatically:
+
+| Event code | When it fires |
+|---|---|
+| `USER_REGISTERED` | A new tester creates an account |
+| `LOGIN` | A tester successfully logs in (with their IP) |
+| `SCAN_COMPLETED` | A tester runs a repository scan (repo URL, branch, gate verdict, critical/high counts) |
+| `ROLE_CHANGE` | An admin changes a user's role |
+| `USER_DEACTIVATION` | An admin revokes an account |
+| `USER_REACTIVATION` | An admin restores an account |
+
+Click **Refresh** at any time to load the latest 100 events.
+
+### 4. Collecting evidence for your dissertation
+
+#### Screenshots
+Capture the following screens with real tester data:
+- **Activity Log** showing `USER_REGISTERED` and `SCAN_COMPLETED` rows for each tester
+- **Registered Users** table showing multiple active accounts with scan counts > 0
+- **Dashboard → Vulnerability Assessment Pipeline** with a real scan result (OWASP findings table, gate verdict, AI-generated patch)
+- **Approve & Create PR** / **Reject Fix** workflow after clicking a PENDING scan in history
+
+#### API evidence (for technical appendix)
+The backend exposes machine-readable evidence at these authenticated endpoints:
+
+```bash
+# All registered users (admin+)
+GET /api/admin/users
+
+# Platform-wide stats (admin+)
+GET /api/admin/stats
+
+# Full activity log (superadmin only)
+GET /api/admin/audit-logs
+
+# Individual scan results for a user
+GET /api/scans
+```
+
+You can hit these with `curl` or Postman using your superadmin JWT:
+```bash
+curl -H "Authorization: Bearer <your_token>" https://<your-vercel-url>/api/admin/audit-logs
+```
+
+#### Suggested dissertation write-up structure
+
+1. **System overview** — link to the GitHub repo and the live Vercel URL
+2. **Evaluation methodology** — describe how testers were given access (self-registration, you provisioned the URL)
+3. **Evidence of use** — include the Activity Log screenshot (covers RQ: *was the system actually used by independent testers?*)
+4. **Functional correctness** — include a scan result showing the OWASP findings table and gate verdict
+5. **Test results** — reference the 32/32 automated test pass rate (`pytest tests/ -v` output)
+6. **Security model** — summarise the RBAC tiers (user → admin → superadmin) and the audit trail
+
+### 5. Recommended tester tasks (evaluation script)
+
+Give each tester the following tasks and ask them to self-report in a questionnaire:
+
+1. Register an account at `<live-url>/register`
+2. Navigate to the **Dashboard**
+3. Paste a public GitHub URL (e.g. `https://github.com/OWASP/WebGoat`) and click **INITIATE SCAN**
+4. Review the OWASP findings table and the AI-generated patch
+5. Click **Approve & Create PR** or **Reject Fix**
+6. Navigate to **Security Gates** and register the repo for continuous monitoring
+7. Report any usability or functional issues
+
+As you collect responses, cross-reference tester names against the Activity Log to confirm their actions were recorded.
 
 ---
 
