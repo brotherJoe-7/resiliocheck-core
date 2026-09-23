@@ -34,6 +34,7 @@ from backend.langchain_pipeline import (
 from backend.database import engine, get_db
 from backend import models, auth, admin
 from backend.auth import get_current_user, get_fernet, decrypt_github_token
+from backend.audit import record_audit
 from backend import webhook
 
 logging.basicConfig(
@@ -66,6 +67,13 @@ def _ensure_columns() -> None:
             "last_scan_date":  "DATE",
         },
         "monitored_repos": {},   # created by create_all; listed here so we can add future cols
+        "audit_logs": {
+            "admin_id":    "INTEGER",
+            "admin_email": "VARCHAR",
+            "action":      "VARCHAR DEFAULT ''",
+            "target":      "VARCHAR DEFAULT ''",
+            "timestamp":   "TIMESTAMP",
+        },
     }
     try:
         insp = sa_inspect(engine)
@@ -82,6 +90,45 @@ def _ensure_columns() -> None:
 
 
 _ensure_columns()
+
+
+def schema_report() -> dict:
+    """
+    Compare the live database with the ORM models and report drift.
+
+    Surfaced on /api/health so a production DB whose tables were created by an
+    older revision (missing tables / columns, NOT NULL columns the code never
+    fills) can be diagnosed without shell access to Cloud Run.
+    """
+    from sqlalchemy import inspect as sa_inspect
+    report: dict = {"ok": True, "missing_tables": [], "missing_columns": {}, "unknown_not_null_columns": {}}
+    try:
+        insp = sa_inspect(engine)
+        live_tables = set(insp.get_table_names())
+        for table in models.Base.metadata.sorted_tables:
+            if table.name not in live_tables:
+                report["missing_tables"].append(table.name)
+                continue
+            live_cols = {c["name"]: c for c in insp.get_columns(table.name)}
+            model_cols = {c.name for c in table.columns}
+            missing = sorted(model_cols - set(live_cols))
+            if missing:
+                report["missing_columns"][table.name] = missing
+            # Columns present in the DB but unknown to the model that are NOT NULL
+            # without a default will make every INSERT fail.
+            extra_nn = sorted(
+                name for name, c in live_cols.items()
+                if name not in model_cols and not c.get("nullable", True) and c.get("default") is None
+            )
+            if extra_nn:
+                report["unknown_not_null_columns"][table.name] = extra_nn
+        report["ok"] = not (
+            report["missing_tables"] or report["missing_columns"] or report["unknown_not_null_columns"]
+        )
+    except Exception as exc:  # pragma: no cover
+        report["ok"] = False
+        report["error"] = str(exc)[:200]
+    return report
 
 
 @asynccontextmanager
@@ -115,6 +162,35 @@ for _local in ("http://localhost:3000", "http://127.0.0.1:3000"):
     if _local not in _allowed_origins:
         _allowed_origins.append(_local)
 
+
+# ── Error boundary (registered BEFORE CORS so it sits *inside* it) ───────────
+# Starlette's default 500 handling lives in ServerErrorMiddleware, the
+# outermost layer — outside CORSMiddleware. A 500 produced there carries no
+# Access-Control-Allow-Origin header, so the browser hides the real status
+# and the dashboard reports "Cannot reach the ResilioCheck API (Failed to
+# fetch)" even though the backend is up. Catching unhandled exceptions here
+# guarantees every error response passes back through CORSMiddleware.
+# `add_middleware` prepends to the stack, so the middleware registered first
+# ends up innermost — this MUST stay above the CORS registration below.
+@app.middleware("http")
+async def _error_boundary(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except PipelineError as exc:
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    except Exception as exc:  # noqa: BLE001
+        error_id = uuid.uuid4().hex[:12]
+        # Full trace stays server-side (Cloud Run logs); clients only get the id.
+        log.exception("Unhandled error [%s] %s %s: %s", error_id, request.method, request.url.path, exc)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": f"Internal server error (ref {error_id}). Please try again.",
+                "error_id": error_id,
+            },
+        )
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
@@ -132,6 +208,7 @@ async def _pipeline_error_handler(_request: Request, exc: PipelineError):
 
 @app.exception_handler(Exception)
 async def _unhandled_error_handler(_request: Request, exc: Exception):
+    # Fallback only (errors raised *outside* the error-boundary middleware).
     # Never leak stack traces / raw exception reprs (e.g. "RetryError[<Future ...>]") to clients.
     log.exception("Unhandled error: %s", exc)
     return JSONResponse(status_code=500, content={"detail": "Internal server error. Please try again."})
@@ -367,6 +444,7 @@ def api_health():
         "status":    "online",
         "version":   app.version,
         "db_status": db_status,
+        "schema":    schema_report(),
         "sandbox":   docker_status(),
         **settings.public_config(),
     }
@@ -588,21 +666,16 @@ async def run_scan(req: ScanRequest, db: Session = Depends(get_db),
         db.commit()
         db.refresh(result)
 
-        # Record scan activity in the audit log (visible to superadmins)
-        try:
-            scan_log = models.AuditLog(
-                admin_id=current_user.id,
-                admin_email=current_user.email,
-                action="SCAN_COMPLETED",
-                target=(
-                    f"{repo_url} (branch={branch}, gate={pipeline_result['gate']}, "
-                    f"critical={pipeline_result['critical_count']}, high={pipeline_result['high_count']})"
-                )
-            )
-            db.add(scan_log)
-            db.commit()
-        except Exception:  # non-fatal — don't let logging break the response
-            pass
+        # Record scan activity in the audit log (visible to superadmins) — best-effort.
+        record_audit(
+            db,
+            actor=current_user,
+            action="SCAN_COMPLETED",
+            target=(
+                f"{repo_url} (branch={branch}, gate={pipeline_result['gate']}, "
+                f"critical={pipeline_result['critical_count']}, high={pipeline_result['high_count']})"
+            ),
+        )
 
         # NOTE: Auto-PR was removed — users approve patches via the dashboard instead.
         # See: POST /api/scans/{id}/apply-patch

@@ -69,13 +69,41 @@ export async function readError(res: Response, fallback = 'Request failed'): Pro
  * Convenience helper: fetch + parse JSON, throwing an ApiError with a clean
  * message on non-2xx responses.
  */
+/**
+ * `fetch` rejects with a bare "Failed to fetch" both when the host is down AND
+ * when the browser blocks the response (CORS preflight rejected, or an error
+ * response that carries no Access-Control-Allow-Origin header). Probe the
+ * public health endpoint with `no-cors` to tell those cases apart: an opaque
+ * response means the server answered, so the problem is the response itself.
+ */
+async function diagnoseNetworkFailure(baseUrl: string): Promise<string> {
+  try {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 5000);
+    await fetch(`${baseUrl}/api/health`, { mode: 'no-cors', cache: 'no-store', signal: ctl.signal });
+    clearTimeout(timer);
+    return (
+      `The ResilioCheck API at ${baseUrl} is reachable, but the browser blocked the response. ` +
+      `This usually means the request failed on the server (HTTP 500) or the origin ${
+        typeof window !== 'undefined' ? window.location.origin : ''
+      } is not in the backend CORS allow-list (FRONTEND_URL). Check the backend logs.`
+    );
+  } catch {
+    return (
+      `Cannot reach the ResilioCheck API at ${baseUrl}. Check that the backend is running ` +
+      `and that NEXT_PUBLIC_API_URL points to it.`
+    );
+  }
+}
+
 export async function apiJson<T = unknown>(endpoint: string, options: RequestInit = {}): Promise<T> {
   let res: Response;
   try {
     res = await fetchApi(endpoint, options);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    throw new ApiError(`Cannot reach the ResilioCheck API (${msg}). Check that the backend is running.`, 0);
+    const hint = typeof window !== 'undefined' ? await diagnoseNetworkFailure(getApiBaseUrl()) : '';
+    throw new ApiError(hint ? `${hint} (${msg})` : `Cannot reach the ResilioCheck API (${msg}).`, 0);
   }
   if (!res.ok) {
     throw new ApiError(await readError(res), res.status);

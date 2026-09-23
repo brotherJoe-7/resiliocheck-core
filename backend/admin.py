@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models import User, AuditLog
 from backend.auth import require_admin, require_superadmin
+from backend.audit import record_audit
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -56,15 +57,8 @@ def update_user_role(user_id: int, role: str | None = None, body: RoleUpdate | N
     
     old_role = user.role
     user.role = role
-    
-    log = AuditLog(
-        admin_id=current.id,
-        admin_email=current.email,
-        action="ROLE_CHANGE",
-        target=f"{user.email} (from {old_role} to {role})"
-    )
-    db.add(log)
     db.commit()
+    record_audit(db, actor=current, action="ROLE_CHANGE", target=f"{user.email} (from {old_role} to {role})")
     return {"status": "success", "user_id": user_id, "new_role": role}
 
 @router.delete("/users/{user_id}")
@@ -76,15 +70,8 @@ def deactivate_user(user_id: int, db: Session = Depends(get_db), current: User =
         raise HTTPException(status_code=400, detail="Cannot deactivate your own account")
     
     user.is_active = False
-    
-    log = AuditLog(
-        admin_id=current.id,
-        admin_email=current.email,
-        action="USER_DEACTIVATION",
-        target=user.email
-    )
-    db.add(log)
     db.commit()
+    record_audit(db, actor=current, action="USER_DEACTIVATION", target=user.email)
     return {"status": "deactivated", "user_id": user_id}
 
 @router.post("/users/{user_id}/reactivate")
@@ -93,14 +80,8 @@ def reactivate_user(user_id: int, db: Session = Depends(get_db), current: User =
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     user.is_active = True
-    log = AuditLog(
-        admin_id=current.id,
-        admin_email=current.email,
-        action="USER_REACTIVATION",
-        target=user.email
-    )
-    db.add(log)
     db.commit()
+    record_audit(db, actor=current, action="USER_REACTIVATION", target=user.email)
     return {"status": "reactivated", "user_id": user_id}
 
 @router.get("/audit-logs")

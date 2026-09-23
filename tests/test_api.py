@@ -217,3 +217,71 @@ def test_settings_roundtrip(client, auth_headers):
     assert r.status_code == 200
     s = client.get("/api/settings", headers=auth_headers).json()
     assert s["workspace"] == "Acme" and isinstance(s["team"], list)
+
+
+# ── Regression: "Cannot reach the ResilioCheck API (Failed to fetch)" on a VALID login ──
+#
+# Root cause found in production: the audit-log INSERT after a successful
+# password check raised, the unhandled exception became a 500 that was emitted
+# outside CORSMiddleware (no Access-Control-Allow-Origin), and the browser
+# surfaced it as a network failure. Wrong passwords (401) worked fine, which is
+# what made it look like a connectivity problem.
+
+def test_health_reports_schema(client):
+    h = client.get("/api/health").json()
+    assert "schema" in h
+    assert h["schema"]["ok"] is True, h["schema"]
+    assert h["schema"]["missing_tables"] == []
+
+
+def test_login_and_register_survive_audit_log_failure(client, monkeypatch):
+    """A broken audit_logs table must never turn a valid login/register into a 500."""
+    from backend import audit as _audit
+    from backend import auth as _auth
+
+    calls = {"n": 0}
+
+    def _boom(*_a, **_k):
+        calls["n"] += 1
+        raise RuntimeError("simulated audit_logs schema drift")
+
+    # Simulate the failing INSERT inside record_audit's own try/except boundary.
+    monkeypatch.setattr(_audit.AuditLog, "__init__", _boom)
+
+    email = "audit-fail@example.com"
+    r = client.post("/api/auth/register", json={"email": email, "password": "password123", "full_name": "A"})
+    assert r.status_code == 200, r.text
+    assert r.json()["access_token"]
+
+    _auth.login_limiter.clients.clear()
+    r = client.post("/api/auth/login", json={"email": email, "password": "password123"})
+    assert r.status_code == 200, r.text
+    assert r.json()["email"] == email
+    assert calls["n"] >= 2  # both audit attempts were made and swallowed
+
+
+def test_server_errors_carry_cors_headers(client, monkeypatch):
+    """
+    A 500 must still pass through CORSMiddleware; otherwise the browser hides
+    the real status and the dashboard reports 'Failed to fetch'.
+    """
+    from backend import auth as _auth
+
+    def _explode(*_a, **_k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(_auth, "verify_password", _explode)
+    client.post("/api/auth/register", json={"email": "cors500@example.com", "password": "password123"})
+    _auth.login_limiter.clients.clear()
+
+    origin = "https://resiliocheck-core.vercel.app"
+    r = client.post(
+        "/api/auth/login",
+        json={"email": "cors500@example.com", "password": "password123"},
+        headers={"Origin": origin},
+    )
+    assert r.status_code == 500
+    assert r.headers.get("access-control-allow-origin") == origin
+    body = r.json()
+    assert "error_id" in body and body["error_id"] in body["detail"]
+    assert "boom" not in r.text  # no leak of the raw exception

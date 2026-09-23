@@ -57,3 +57,4 @@ scratch/
 # ── GCP / cloud service account keys ─────────────────────────────────────────
 *-*.json
 *.json.bak
+.pw-cache/
