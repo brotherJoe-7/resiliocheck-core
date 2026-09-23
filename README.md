@@ -315,7 +315,7 @@ All `/api/*` routes except `/api/health` and `/api/auth/*` require `Authorizatio
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/api/health` | Version, DB status, sandbox tool availability, model chain, key/OAuth presence (never the secrets) |
+| `GET` | `/api/health` | Version, DB status, **schema drift report** (`schema.ok`, missing tables/columns), sandbox tool availability, model chain, key/OAuth presence (never the secrets) |
 | `GET` / `POST` | `/api/gates` · `POST /api/gates/{id}/toggle` | Security gates CRUD |
 | `GET` | `/api/agents` · `POST /api/agents/{id}/toggle` | Autonomous agents |
 | `GET` | `/api/deployments` | Deployments derived from the 10 latest scans |
@@ -401,7 +401,7 @@ Set `NEXT_PUBLIC_API_URL` to the Cloud Run URL. `*.vercel.app` origins are alway
 - **Auth** — bcrypt password hashes, HS256 JWTs (24 h), `WWW-Authenticate` on 401, inactive accounts rejected at login, role checks for admin routes, audit log for role changes / deactivations, **5 req/min/IP rate limit** on login & register, auth-event logging.
 - **Tenant isolation** — scans and monitored repos carry `user_id`; detail/patch endpoints check ownership (IDOR protection). GitHub OAuth tokens are stored per user and never returned by the API.
 - **Input hardening** — Pydantic length limits plus sanitisation of free-text fields on every entry point; webhook payloads are HMAC-verified before parsing; request audit middleware logs method, path, IP and status.
-- **No secret leakage** — `/api/health` reports presence booleans only; the global exception handler returns a generic 500 and logs the trace server-side.
+- **No secret leakage** — `/api/health` reports presence booleans only; unhandled errors are caught by an error-boundary middleware *inside* CORS, returning a generic 500 with an `error_id` that is also written to the server log.
 - **Prompt isolation** — system prompts in `config/prompts.py` are constants; repository code only ever appears in the `user` message.
 
 ---
@@ -419,7 +419,7 @@ Set `NEXT_PUBLIC_API_URL` to the Cloud Run URL. `*.vercel.app` origins are alway
 | Webhook returns 401 | `GITHUB_WEBHOOK_SECRET` on the backend differs from the secret configured on the GitHub webhook. Re-add the monitored repo to re-register it. |
 | `Too many attempts` on login | Brute-force limiter (5/min/IP). Wait a minute. |
 | Dashboard keeps redirecting to `/login` | Backend restarted with an ephemeral dev JWT key. Set a fixed `JWT_SECRET_KEY`. |
-| `Cannot reach the ResilioCheck API (Failed to fetch)` on login / CORS error in the browser | The browser's CORS preflight was rejected (`Disallowed CORS origin`), so `fetch` fails before any response is received. `https://*.vercel.app` is allowed by default via `CORS_ALLOW_ORIGIN_REGEX`; for custom domains add the exact origin (no trailing slash) to `FRONTEND_URL` and redeploy the backend. Verify with `curl -i -X OPTIONS <API>/api/auth/login -H "Origin: <your-origin>" -H "Access-Control-Request-Method: POST"` — you should get `200` with `access-control-allow-origin`. |
+| `Cannot reach the ResilioCheck API (Failed to fetch)` on login / CORS error in the browser | `fetch` reports the same bare error for three different situations. **(a)** Backend down / wrong `NEXT_PUBLIC_API_URL` — `curl <API>/api/health` fails. **(b)** CORS preflight rejected (`Disallowed CORS origin`) — `https://*.vercel.app` is allowed by default via `CORS_ALLOW_ORIGIN_REGEX`; for custom domains add the exact origin (no trailing slash) to `FRONTEND_URL` and redeploy. Verify with `curl -i -X OPTIONS <API>/api/auth/login -H "Origin: <your-origin>" -H "Access-Control-Request-Method: POST"` → expect `200` + `access-control-allow-origin`. **(c)** The request reached the backend but crashed (HTTP 500) — older revisions emitted 500s *outside* the CORS middleware, so the browser hid the status. Typical trigger: a *correct* password failing while a wrong one returns a clean 401, because the post-login audit-log `INSERT` hit a drifted `audit_logs` table. Reproduce with `curl -i -X POST <API>/api/auth/login -H "Content-Type: application/json" -d '{"email":"…","password":"…"}'`, check `/api/health → schema` for missing tables/columns, and read the Cloud Run logs for the `error_id` returned in the response. Audit-log writes are now best-effort and every error response carries CORS headers, so the dashboard shows the real message. |
 | `RuntimeError: JWT_SECRET_KEY is required in production` | Expected when `ENVIRONMENT=production` — set the secret. |
 
 ---
@@ -434,7 +434,8 @@ Set `NEXT_PUBLIC_API_URL` to the Cloud Run URL. `*.vercel.app` origins are alway
 │   ├── langchain_pipeline.py   GroqClient (fallback + retry-after) and the OWASP → Gate → Patch agents
 │   ├── core.py                 repo download (public + OAuth), file collection, secret regexes, subprocess sandbox
 │   ├── settings.py             typed environment configuration, engine → model chain
-│   ├── auth.py / admin.py      JWT auth, GitHub OAuth, rate limiter, RBAC, audit log
+│   ├── auth.py / admin.py      JWT auth, GitHub OAuth, rate limiter, RBAC
+│   ├── audit.py                best-effort audit-log writer (never fails the calling request)
 │   ├── models.py / database.py SQLAlchemy 2.0 models & session
 │   └── Dockerfile.sandbox      (legacy) Docker image — no longer required at runtime
 ├── config/prompts.py           system prompts (constants, never formatted with user data)
